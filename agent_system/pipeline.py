@@ -544,7 +544,13 @@ class Pipeline:
     def _execute(self, task_id: str, video: Any, state: dict[str, Any]) -> str:
         try:
             self.storage.set_state(task_id, "generating", state)
-            understanding_raw = self._call(task_id, "N03", "understand", {"video": to_dict(video)}, "Understanding")
+            understanding_raw = self._call(task_id, "N03", "understand", {
+                "video": to_dict(video),
+                "source_title": {
+                    "text": video.title, "quality": "source",
+                    "note": "唯一一手文本。可作改写基线（压缩/规整/去标题党），但不是事实依据；与材料冲突时以材料为准。",
+                },
+            }, "Understanding")
             understanding = _normalize_understanding(understanding_raw)
             state["understanding"] = to_dict(understanding)
             state["prompt_hashes"]["understand"] = self._last_prompt_hash(task_id, "N03", "understand")

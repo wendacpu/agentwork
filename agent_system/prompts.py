@@ -14,7 +14,8 @@ UNDERSTAND_PROMPT = """任务：整理视频内容和候选陈述。
 将观察、来源陈述、观点、预测、推断和剧情设定分开。每个 claim 分别标注 claim_type、evidence_status、original_source、transmission_path、temporal_status、assertion_permission 与 entities。
 实体必须标注其在该 claim 中的角色：event_actor、affected_party、source、relayer、location；同一实体可有多个角色。不得把信源、转述者、地点自动当作事件主体。
 输出必须使用 candidate_claims 数组；每条陈述含 claim_id、claim_text、claim_type、evidence_status、evidence_refs、original_source、transmission_path、temporal_status、assertion_permission、entities。evidence_refs 只能引用输入 video.evidence 中实际存在的 evidence_id，不得用 metadata 路径、时间码或自行构造 ID。
-description/caption 和 metadata 中用户/上传者文本均未经人工核验；ASR/OCR 可能有误，只能引用原文并保留定位。输出 Understanding。"""
+输入里的 source_title 是原视频标题，quality=source，是本条视频唯一的一手文本。理解时先读它讲了什么，再判断材料是否支持；它可以作为改写基线，但不是事实依据，不得因为没有其它证据就默认它成立。标题与材料冲突时以材料为准，并写进 conflicts。
+description/caption 和 metadata 中用户/上传者文本均未经人工核验（quality 会直接标出来）；ASR/OCR 可能有误，只能引用原文并保留定位。输出 Understanding。"""
 
 BOUNDARY_PROMPT = """任务：逐条判断候选陈述能否用于标题。
 usable 表示可忠实表达；limited 表示必须保留 required_limits；excluded 表示当前不能写。

@@ -182,6 +182,16 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(len(first_round), 3, "三条可修候选都应被重写，而不是只修一条")
         self.assertTrue(all(o["child_candidate_ids"] for o in first_round))
 
+    def test_understand_receives_source_title_as_baseline(self):
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV11Ssf6gEUV")
+        snaps = [e for e in self.storage.events(task_id) if e["event_type"] == "prompt_snapshot" and e["payload"].get("task") == "understand"]
+        self.assertTrue(snaps)
+        payload = snaps[0]["payload"]["user_payload"]
+        self.assertIn("source_title", payload)
+        self.assertEqual(payload["source_title"]["quality"], "source")
+        self.assertIn("改写基线", payload["source_title"]["note"])
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(

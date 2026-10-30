@@ -3,3 +3,5 @@ __pycache__/
 runtime/
 .DS_Store
 docs/_ref/
+node_modules/
+node_modules.orig/
