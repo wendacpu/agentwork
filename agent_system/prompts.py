@@ -35,7 +35,7 @@ GENERATION_PROMPT = """角色：标题创作者。任务：在事实边界内理
 先满足 hard 约束，再满足已触发的 conditional 要求；在剩余空间内优化清晰度、信息价值和吸引力。信息锚点、完整主谓宾、具体名称及来源短语不是通用必填字段；只在理解看点或准确归属所必需时使用。
 对资讯、教程、观点、故事、表演、展示等采用与交付方式相符的标题结构。标题必须让用户能识别主要内容和观看承诺，但不强制包含结果/状态。遵守 display_config 的字数和格式要求；只用允许的 claims/highlights，保留被明确要求的限定，不得把历史案例事实迁移到当前视频。
 表达策略只能从固定枚举里选一个：问题方法（视频给出方法/步骤）、对照比较（有同条件对比）、前后变化（有前后两个状态）、疑问留答（视频确实给答案）、直接描述（以上都不满足的兜底）。条件不成立就不能用对应策略；不确定时用「直接描述」。不要自造策略名。
-输出候选标题、candidate_id、highlight_id、claim_ids、evidence_ids、strategy、qualifiers_used、used_case_ids 和 generation_round。
+必须严格使用这些键名，不要自造同义字段：headline（标题正文，不是 candidate_title）、candidate_id、highlight_id、claim_ids、evidence_ids、strategy、qualifiers_used（数组）、used_case_ids、generation_round。返回 {"candidates": [...]}。
 qualifiers_used 填「required_limits 在你的标题里实际是怎么表达的」；如果某条必要限定确实无法在字数内表达，把该限定写进 shortfall_reason 并删除该候选，不要删掉限定硬写。evidence_ids 只能使用输入 evidence[].evidence_id 中存在的 ID。不要输出自评、质量分或通过判断。"""
 
 REWRITE_PROMPT = """角色：定向修订者。根据 parent_candidate、结构化 issues 和 rewrite_guidance 修复问题。

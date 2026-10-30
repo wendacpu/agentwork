@@ -24,6 +24,9 @@ class RunConfig:
     reference_time: str = ""
     ocr_mode: str = "filtered"
     model_provider: str = "mock"
+    base_url: str = ""
+    api_key_env: str = ""
+    reasoning_effort: str = ""
     generation_model: str = "mock"
     review_model: str = "mock"
     asset_root: str = "/Users/wanting/program/新项目/复杂agent/recent-portrait-100"
@@ -40,6 +43,8 @@ class RunConfig:
             "asset_root": os.getenv("AGENT_ASSET_ROOT"),
             "model_provider": os.getenv("AGENT_MODEL_PROVIDER"),
             "generation_model": os.getenv("AGENT_GENERATION_MODEL"),
+            "base_url": os.getenv("AGENT_BASE_URL"),
+            "api_key_env": os.getenv("AGENT_API_KEY_ENV"),
             "review_model": os.getenv("AGENT_REVIEW_MODEL"),
             "output_dir": os.getenv("AGENT_OUTPUT_DIR"),
         }.items():

@@ -192,6 +192,27 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(payload["source_title"]["quality"], "source")
         self.assertIn("改写基线", payload["source_title"]["note"])
 
+    def test_candidate_title_alias_is_accepted(self):
+        from agent_system.pipeline import _normalize_candidates
+        out = _normalize_candidates({"candidates": [{"candidate_id": "c1", "candidate_title": "挪威首相驳斥FT报道",
+                                                     "highlight_id": "h1", "claim_ids": ["c1"], "evidence_ids": ["e1"],
+                                                     "strategy": "直接描述", "qualifiers_used": "无"}]}, 0, None)
+        self.assertEqual(out[0]["headline"], "挪威首相驳斥FT报道")
+        self.assertEqual(out[0]["qualifiers_used"], ["无"])
+
+    def test_understanding_finds_claims_in_any_layer(self):
+        from agent_system.pipeline import _normalize_understanding
+        # 形态 A：claims 在顶层，understanding 只是子字段
+        a = _normalize_understanding({"video_id": "x", "understanding": {"summary": "s"},
+                                      "candidate_claims": [{"claim_id": "c-01", "claim_text": "事实一"}]})
+        self.assertEqual(len(a.claims), 1)
+        # 形态 B：claims 套在 understanding 里
+        b = _normalize_understanding({"understanding": {"candidate_claims": [{"claim_id": "c-02", "claim_text": "事实二"}]}})
+        self.assertEqual(len(b.claims), 1)
+        # 形态 C：大写包裹
+        c = _normalize_understanding({"Understanding": {"claims": [{"claim_id": "c-03", "claim_text": "事实三"}]}})
+        self.assertEqual(len(c.claims), 1)
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(

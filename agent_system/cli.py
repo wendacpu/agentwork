@@ -28,12 +28,23 @@ def build(args: argparse.Namespace):
     return config, dataset, storage, make_pipeline(config, dataset, storage)
 
 
+PROVIDER_DEFAULTS = {
+    "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+    "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
+    "kimi": ("https://api.moonshot.cn/v1", "MOONSHOT_API_KEY"),
+    "juflow": ("https://juflowai.com/v1", "JUFLOW_API_KEY"),
+}
+
+
 def make_pipeline(config: RunConfig, dataset: Dataset, storage: Storage) -> Pipeline:
-    if config.model_provider == "mock": adapter = MockAdapter(); review_adapter = MockAdapter()
-    elif config.model_provider == "deepseek": adapter = OpenAICompatibleAdapter("https://api.deepseek.com", "DEEPSEEK_API_KEY", config.generation_model); review_adapter = OpenAICompatibleAdapter("https://api.deepseek.com", "DEEPSEEK_API_KEY", config.review_model)
-    elif config.model_provider == "qwen": adapter = OpenAICompatibleAdapter("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY", config.generation_model); review_adapter = OpenAICompatibleAdapter("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY", config.review_model)
-    elif config.model_provider == "kimi": adapter = OpenAICompatibleAdapter("https://api.moonshot.cn/v1", "MOONSHOT_API_KEY", config.generation_model); review_adapter = OpenAICompatibleAdapter("https://api.moonshot.cn/v1", "MOONSHOT_API_KEY", config.review_model)
-    else: raise ValueError(f"unknown provider: {config.model_provider}")
+    if config.model_provider == "mock":
+        return Pipeline(dataset, storage, MockAdapter(), config, MockAdapter())
+    if config.model_provider not in PROVIDER_DEFAULTS:
+        raise ValueError(f"unknown provider: {config.model_provider}")
+    default_base, default_key = PROVIDER_DEFAULTS[config.model_provider]
+    base, key_env = config.base_url or default_base, config.api_key_env or default_key
+    adapter = OpenAICompatibleAdapter(base, key_env, config.generation_model, reasoning_effort=config.reasoning_effort)
+    review_adapter = OpenAICompatibleAdapter(base, key_env, config.review_model, reasoning_effort=config.reasoning_effort)
     return Pipeline(dataset, storage, adapter, config, review_adapter)
 
 

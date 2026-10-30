@@ -89,17 +89,23 @@ class MockAdapter:
 
 
 class OpenAICompatibleAdapter:
-    def __init__(self, base_url: str, api_key_env: str, model: str, timeout: int = 90) -> None:
+    def __init__(self, base_url: str, api_key_env: str, model: str, timeout: int = 300, reasoning_effort: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key_env = api_key_env
         self.model = model
         self.timeout = timeout
+        self.reasoning_effort = reasoning_effort
 
     def complete(self, *, task: str, system: str, user: dict[str, Any], schema: str, attempt: int = 0) -> ModelReply:
         key = os.getenv(self.api_key_env)
         if not key:
             raise ModelError(f"missing API key environment variable: {self.api_key_env}", retryable=False)
         payload = {"model": self.model, "temperature": 0.2, "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], "response_format": {"type": "json_object"}}
+        if self.reasoning_effort == "off":
+            # DeepSeek V4.1 默认开思考；关掉可把单节点从 ~68s 压到十几秒，代价是推理质量下降
+            payload["thinking"] = {"type": "disabled"}
+        elif self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         req = urllib.request.Request(self.base_url + "/chat/completions", data=json.dumps(payload).encode(), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         start = time.monotonic()
         try:

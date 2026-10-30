@@ -5,3 +5,5 @@ runtime/
 docs/_ref/
 node_modules/
 node_modules.orig/
+.secrets.env
+.secrets/

@@ -156,10 +156,25 @@ def _source_object(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
-    if isinstance(raw.get("Understanding"), dict):
-        raw = raw["Understanding"]
+    # 模型输出形态不稳定：有时 claims 在顶层，有时套在 Understanding/understanding 里，
+    # 还有把 understanding 当子字段、claims 平铺在外层的情况。先按「任意层找列表」再解包。
+    raw_claims = []
+    for key in ("claims", "candidate_claims", "facts"):
+        if isinstance(raw.get(key), list) and raw[key]:
+            raw_claims = raw[key]
+            break
+    if not raw_claims:
+        for wrapper in ("Understanding", "understanding", "result", "output", "data"):
+            inner = raw.get(wrapper)
+            if isinstance(inner, dict):
+                for key in ("claims", "candidate_claims", "facts"):
+                    if isinstance(inner.get(key), list) and inner[key]:
+                        raw = inner
+                        raw_claims = inner[key]
+                        break
+            if raw_claims:
+                break
     claims = []
-    raw_claims = raw.get("claims") or raw.get("candidate_claims") or raw.get("facts") or []
     for i, item in enumerate(raw_claims):
         item = dict(item)
         refs = item.get("evidence_refs") or item.get("evidence_ids") or []
@@ -213,7 +228,10 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             raw = nested
             break
     items = raw.get("decisions") or raw.get("items") or raw.get("claims") or raw.get("boundaries") or []
-    if not items and raw and all(isinstance(value, dict) for value in raw.values()):
+    if not items and isinstance(raw.get("decision"), str):
+        # 模型有时把单条决策平铺返回，而不是 {"decisions": [...]}
+        items = [dict(raw)]
+    if not items and not isinstance(raw.get("decision"), str) and raw and all(isinstance(value, dict) for value in raw.values()):
         items = raw
     if isinstance(items, dict):
         items = [{"claim_id": claim_id, **(item if isinstance(item, dict) else {})} for claim_id, item in items.items()]
@@ -252,7 +270,8 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
     out = []
     for i, item in enumerate(raw.get("candidates", [])):
         item = dict(item)
-        headline = item.get("headline") or item.get("title") or item.get("copy") or item.get("draft_text") or item.get("text")
+        headline = (item.get("headline") or item.get("candidate_title") or item.get("title_text")
+                    or item.get("title") or item.get("copy") or item.get("draft_text") or item.get("text"))
         if not headline: continue
         candidate_schema_errors = []
         if not (item.get("candidate_id") or item.get("draft_id") or item.get("id")): candidate_schema_errors.append("candidate_id missing from generation output")
@@ -264,7 +283,7 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
             text_id = str(claim_id)
             if text_id.startswith("c-") and text_id[2:].isdigit(): text_id = "c" + str(int(text_id[2:]))
             claim_ids.append(text_id)
-        out.append({"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(headline), "highlight_id": str(item.get("highlight_id") or "h1"), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": [str(x) for x in (item.get("qualifiers_used") or [])], "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors})
+        out.append({"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(headline), "highlight_id": str(item.get("highlight_id") or "h1"), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": ([str(item["qualifiers_used"])] if isinstance(item.get("qualifiers_used"), str) else [str(x) for x in (item.get("qualifiers_used") or [])]), "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors})
     return out
 
 
