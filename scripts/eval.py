@@ -91,6 +91,34 @@ def pick_task(candidates: list[dict], wanted_task_id: str) -> tuple[dict | None,
     return ((candidates or [None])[0], "")
 
 
+def rewrite_stats(tasks: dict[str, list[dict]]) -> dict:
+    """汇总 rewrite_outcomes：重写到底修掉了什么、又犯了什么。
+
+    只统计「有 parent_issue_codes」的轮次——因为 Q 分低但没出 issue 的重写，
+    根本没法判断修掉了什么，混进来会让挽救率虚高。
+    """
+    outcomes = [o for items in tasks.values() for t in items for o in (t["state"].get("rewrite_outcomes") or [])]
+    comparable = [o for o in outcomes if o.get("parent_issue_codes")]
+    fully = [o for o in comparable if not (o.get("repeated") or [])]
+    partial = [o for o in comparable if (o.get("resolved") or []) and (o.get("repeated") or [])]
+    none_fixed = [o for o in comparable if not (o.get("resolved") or [])]
+    repeated_codes: dict[str, int] = {}
+    for o in outcomes:
+        for code in o.get("repeated") or []:
+            repeated_codes[code] = repeated_codes.get(code, 0) + 1
+    modes: dict[str, int] = {}
+    for o in outcomes:
+        key = str(o.get("mode") or "未知")
+        modes[key] = modes.get(key, 0) + 1
+    return {
+        "total": len(outcomes), "comparable": len(comparable),
+        "fully": len(fully), "partial": len(partial), "none_fixed": len(none_fixed),
+        "uncomparable": len(outcomes) - len(comparable),
+        "repeated_codes": sorted(repeated_codes.items(), key=lambda kv: -kv[1])[:3],
+        "modes": modes,
+    }
+
+
 def review_gates(state: dict, candidate_id: str) -> dict[str, str]:
     for review in state.get("reviews") or []:
         if review.get("candidate_id") == candidate_id:
@@ -173,6 +201,9 @@ def main() -> int:
     g1_miss = [r for r in g1_cases if r["g1_status"] == "pass"]
     g1_rate = len(g1_miss) / len(g1_cases) if g1_cases else None
 
+    rw = rewrite_stats(tasks)
+    rescue = (rw["fully"] / rw["comparable"]) if rw["comparable"] else None
+
     def pct(v):
         return "—" if v is None else f"{v * 100:.1f}%"
 
@@ -192,6 +223,31 @@ def main() -> int:
         f"| G1 漏拦率 | {pct(g1_rate)} | {len(g1_cases)} 条 G1 问题 | 人工判 G1 有问题但系统 G1=pass |",
         "",
     ]
+    lines += [
+        "## 重写有效性",
+        "",
+        "> 只统计本轮任务库里真实发生过的重写（`rewrite_outcomes`），与 gold.csv 无关。",
+        "",
+        "| 口径 | 数值 | 说明 |",
+        "|---|---|---|",
+        f"| 重写轮次 | {rw['total']} | 发生过的重写次数 |",
+        f"| 可比轮次 | {rw['comparable']} | 有明确 issue 可对照的轮次 |",
+        f"| 完全解决 | {rw['fully']}（{pct(rescue)}） | 上一轮的问题这轮没再出现 |",
+        f"| 部分解决 | {rw['partial']} | 修掉一些、又犯了一些 |",
+        f"| 无改善 | {rw['none_fixed']} | 上一轮的 issue 全部再现 |",
+        f"| 不可比 | {rw['uncomparable']} | 因 Q 分低触发，没有 issue 可对照 |",
+        "",
+    ]
+    if rw["modes"]:
+        lines.append("重写模式分布：" + "，".join(f"{k} {v} 次" for k, v in rw["modes"].items()))
+        lines.append("")
+    if rw["repeated_codes"]:
+        lines.append("反复出现的 issue（Top 3）：" + "，".join(f"`{c}` ×{n}" for c, n in rw["repeated_codes"]))
+        lines.append("")
+    if rw["comparable"] == 0:
+        lines.append("⚠️ 还没有可比的重写轮次：需要一次「评审报了 issue → 重写 → 再评审」的完整记录。")
+        lines.append("")
+
     if rows:
         lines += [
             "## 参与统计的样本",
