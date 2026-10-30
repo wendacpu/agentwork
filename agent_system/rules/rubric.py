@@ -39,7 +39,7 @@ TEMP_RUBRIC: dict[str, Any] = {
     "version": REVIEW_RUBRIC_VERSION,
     "calibration_status": "uncalibrated",
     "gates": {
-        "G1": {"name": "事实与断言许可", "criteria": "证据支持、实体角色、来源传播、时间状态、断言强度", "owner": "reviewer", "statuses": ["pass", "revise", "needs_review", "reject"]},
+        "G1": {"name": "事实与断言许可", "criteria": "证据支持、实体角色、来源传播与权威性、时间状态、断言强度", "owner": "reviewer", "statuses": ["pass", "revise", "needs_review", "reject"]},
         "G2": {"name": "已批准业务政策", "criteria": "仅按已加载且已批准的政策；缺失或冲突时 needs_review", "owner": "reviewer", "statuses": ["pass", "revise", "needs_review", "reject"]},
         "G3": {"name": "内容交付与承诺", "criteria": "标题是否描述所选看点并由视频兑现；不要求列出全部事实", "owner": "reviewer", "statuses": ["pass", "revise", "needs_review", "reject"]},
         "G4": {"name": "机械约束", "criteria": "长度、格式、结构字段、有效引用", "owner": "program", "statuses": ["pass", "fail"]},
