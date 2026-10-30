@@ -1,0 +1,18 @@
+{
+  "schema_version": "2026-10-30",
+  "purpose": "Small project source files were renamed for stable code references; original external video asset names remain BV IDs.",
+  "renames": {
+    "百条近期中文竖屏视频完整字段.json": "video_dataset.json",
+    "候选.json": "candidate_pool.json",
+    "下载结果.json": "download_records.json",
+    "作者认证.json": "author_verification.json",
+    "筛选统计.json": "selection_statistics.json",
+    "内容领域与形态枚举.md": "content_taxonomy.md",
+    "标注规范.md": "annotation_guidelines.md",
+    "筛选规则.md": "selection_rules.md",
+    "采集与核验说明.md": "collection_notes.md",
+    "headline-workflow.html": "docs/design/headline_workflow_v0.2.html",
+    "生成部分思维导图.png": "docs/design/generation_flow.png"
+  },
+  "preserved_external_asset_root": "/Users/wanting/program/新项目/复杂agent/recent-portrait-100"
+}

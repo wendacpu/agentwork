@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>标题生成工作流 · 节点、数据与决策</title>
+<style>
+:root{color-scheme:light;--paper:#f6f7f4;--ink:#202e2b;--muted:#5e6e67;--line:#dce3dd;--green:#24664d;--tint:#e9f2eb;--amber:#8c5d1e;--amber-bg:#fbf2e1;--red:#a24638;--red-bg:#faeeeb;--white:#fff;--code:#f0f3ef;--blue:#3b627c}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.75 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}button,input,select{font:inherit}button,select{cursor:pointer}button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #7dac95;outline-offset:3px}button{border:1px solid var(--line);background:var(--white);color:var(--ink);padding:9px 14px;border-radius:8px}button:hover{border-color:var(--green)}button[aria-pressed=true],button.active{background:var(--green);border-color:var(--green);color:var(--white)}button:disabled{opacity:.45;cursor:default}a{color:var(--green)}.wrap{max-width:1320px;margin:auto;padding:36px 36px 56px}.eyebrow{color:var(--green);font-size:12px;letter-spacing:.12em}.head{display:flex;gap:24px;justify-content:space-between;align-items:flex-start}.head h1{font-size:34px;line-height:1.3;letter-spacing:-1px;margin:13px 0}.head p{margin:0;max-width:760px;color:var(--muted)}.version{white-space:nowrap;font-size:12px;color:var(--muted);padding-top:8px}.tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);margin:28px 0 26px;padding-bottom:12px}.tabs button{border:0;background:transparent;border-radius:6px}.tabs button.active{background:var(--ink);color:white}.section-title{margin:0 0 6px;font-size:24px;line-height:1.4}.lede{color:var(--muted);margin:0 0 22px;max-width:900px}.notice{padding:14px 18px;border-left:3px solid var(--green);background:var(--tint);margin:18px 0;border-radius:0 8px 8px 0}.notice.warn{border-color:var(--amber);background:var(--amber-bg)}.notice.error{border-color:var(--red);background:var(--red-bg)}.small{font-size:13px;color:var(--muted)}.tag{display:inline-flex;padding:2px 9px;border-radius:20px;background:var(--code);font-size:12px;color:var(--muted);align-items:center;gap:6px}.tag.green{background:var(--tint);color:var(--green)}.tag.amber{background:var(--amber-bg);color:var(--amber)}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.decision{background:var(--white);border:1px solid var(--line);padding:22px;border-radius:12px}.decision b{font-size:19px;display:block;margin:7px 0}.decision p{margin:8px 0 0;color:var(--muted)}h3{font-size:18px;margin:28px 0 12px}h4{font-size:15px;margin:18px 0 8px}p{margin:10px 0}strong{font-weight:650}.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:20px 0}.phase{min-width:0}.phase-label{font-size:13px;color:var(--muted);padding-bottom:10px;border-bottom:2px solid var(--line);margin-bottom:12px}.step{width:100%;text-align:left;display:flex;gap:10px;align-items:center;margin:8px 0;min-height:54px}.step .id{font-size:12px;font-family:monospace;color:var(--muted)}.step.active .id{color:inherit}.step small{display:block;color:var(--muted);font-size:11px}.flow .step:not(:last-child):after{content:'↓';margin-left:auto;color:var(--muted)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:12px 14px;vertical-align:top;border-bottom:1px solid var(--line);overflow-wrap:anywhere}th{color:var(--muted);font-weight:500;background:var(--code)}table code{font-size:12px}td:first-child{min-width:110px}.lane-table th:first-child{width:145px}.lane-table button{padding:5px 8px;font-size:12px;margin:3px}.lane-table td{min-width:170px}.lane-table .data-cell{border-bottom:1px dashed var(--line);color:var(--muted)}.details-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:26px}.side{border-right:1px solid var(--line);padding-right:18px;align-self:start;position:sticky;top:16px}.side button{display:block;width:100%;text-align:left;margin:3px 0;padding:8px 10px;border:0;background:transparent;font-size:13px}.side button.active{background:var(--tint);color:var(--green);font-weight:600}.side .group{font-size:11px;color:var(--muted);padding:12px 10px 4px}.panel{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:24px;min-width:0}.meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.bridge{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin:18px 0}.bridge>div{padding:12px 16px;background:var(--code);border-radius:8px;min-width:0}.bridge code{display:block;font-size:13px;margin:4px 0;overflow-wrap:anywhere}.bridge p{font-size:13px;margin:3px 0}.bridge .arrow{padding:0;background:none;color:var(--muted)}.twocol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.code{background:var(--code);padding:16px;border-radius:8px;overflow:auto;font:12.5px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2;margin:8px 0}.raw{background:#202c28;color:#e4efe6}.list{padding-left:22px;margin:8px 0}.list li{margin:6px 0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.controls{margin:18px 0}.select-field{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.select-field select{padding:8px 12px;max-width:100%;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}.trace-list{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0}.trace-list button{padding:6px 10px;font-size:12px}.trace-stop{color:var(--red)}.statusbar{display:flex;gap:10px;align-items:center;margin:18px 0}.statusbar span{display:inline-block}.module{padding:18px 0;border-bottom:1px solid var(--line)}details{margin:14px 0}summary{cursor:pointer;color:var(--green);font-weight:600}.checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.checkbox{padding:17px;border:1px solid var(--line);border-radius:10px;background:var(--white)}.checktop{font-size:12px;color:var(--green)}.checktitle{font-size:18px;font-weight:600;margin:8px 0}.checks code{font-size:12px;overflow-wrap:anywhere}.schema-index{display:flex;gap:6px;flex-wrap:wrap}.schema-index button{font-size:12px;padding:6px 10px}.foot{margin-top:32px;border-top:1px solid var(--line);padding-top:16px;font-size:12px;color:var(--muted)}[hidden]{display:none!important}.mono{font-family:ui-monospace,monospace}.phase-note{margin:12px 0;color:var(--muted);font-size:13px}.result-title{font-size:20px;margin:10px 0}.mobile-select{display:none}
+@media(max-width:900px){.wrap{padding:24px}.head{display:block}.version{margin-top:12px}.head h1{font-size:28px}.grid3{grid-template-columns:1fr}.flow{grid-template-columns:repeat(2,minmax(0,1fr))}.details-layout{grid-template-columns:190px minmax(0,1fr);gap:16px}.panel{padding:18px}.twocol{grid-template-columns:1fr}.checks{grid-template-columns:1fr}.bridge{grid-template-columns:1fr}.bridge .arrow{display:none}}
+@media(max-width:600px){.wrap{padding:20px 16px}.head h1{font-size:26px}.tabs{gap:3px}.tabs button{font-size:13px;padding:8px 9px}.flow{grid-template-columns:1fr}.details-layout{display:block}.side{display:none}.mobile-select{display:flex;margin-bottom:16px}.panel{padding:16px}.section-title{font-size:22px}.table-wrap{margin:0 -2px}.bridge{gap:8px}.row button{flex-grow:1}th,td{padding:10px}.version{white-space:normal}}
+@media print{body{background:white}.tabs,.side,.controls,.trace-list,.mobile-select{display:none}.wrap{max-width:none;padding:0}.panel{border:0;padding:0}.details-layout{display:block}.code{white-space:pre-wrap}.head h1{font-size:24px}}
+</style>
+</head>
+<body><div class="wrap" id="app">
+<header class="head"><div><div class="eyebrow">WORKFLOW / DATA CONTRACT / DECISION</div><h1>标题生成，逐步拆开。</h1><p>把“能写什么 → 重点写什么 → 怎样表达”落到节点、函数和数据对象。每一个箭头，都明确传递的内容。</p></div><div class="version">设计稿 v0.2<br>2026-10-29 · 方案设计阶段</div></header>
+<nav class="tabs" aria-label="文档章节" id="tabs"></nav>
+<main id="content"></main>
+<footer class="foot">本页是设计说明与构造样例。模型结果预置；交互中的结构校验、路由和候选长度检查在本地执行。未接入真实模型、数据集或线上业务，不能据此声称质量收益。</footer>
+</div>
+<script>
+const DOC = {
+  version:'设计稿 v0.2 · 2026-10-29',
+  lanes:['业务交互层','流程控制层','智能处理层','动作执行层','数据与知识层'],
+  nodes:[
+    {id:'N00',name:'受理视频任务',lane:0,fn:'accept_task',phase:0,
+      purpose:'为一次标题生成创建独立任务，把业务输入与运行配置一起固定下来。',
+      input:'TaskRequest + RunConfig',output:'RunInput',from:'业务上传或上游数据接口',to:'N01 输入校验',
+      inputs:[['video','业务输入','原始视频字段；OCR、作者信息也在这里'],['config','系统配置','规则版本、使用时间、目标候选数和调用预算']],
+      outputs:[['run_id','string','本次任务 ID，与 video_id 分开'],['request','TaskRequest','原始请求快照'],['config','RunConfig','固定本次 reference_time、规则版本和预算']],
+      logic:['生成 run_id；同一视频可对应多次不同任务。','在任务开始时固定规则版本，避免执行途中规则变化。','记录任务开始事件。日志失败默认不改变业务判断，另行记录监控故障；这是待确认的运行策略。'],
+      failures:['无法解析业务请求：返回 INVALID_REQUEST，不进入模型。'],
+      boundaries:'不在这里判断视频事实、作者可靠性或标题质量。',
+      code:'run = accept_task(request, config)\n# run.run_id 标识这一次运行\n# run.config.rule_version 在全程保持不变'},
+    {id:'N01',name:'输入校验与规范化',lane:1,fn:'validate_input',phase:0,
+      purpose:'判断输入能否被后续代码处理；将缺失、空值、无效格式显式化。',
+      input:'RunInput',output:'InputCheck',from:'N00',to:'ok → N02；invalid → X01',
+      inputs:[['run.request.video','RawVideo','video_id、title、summary、asr、ocr、author、时间与来源'],['run.config','RunConfig','字段要求、时区等输入约定']],
+      outputs:[['status','ok | invalid','结构校验结论'],['packet','VideoPacket | null','仅 status=ok 时存在；不覆盖原始材料'],['warnings','Issue[]','可继续的缺失或格式问题'],['errors','Issue[]','阻断输入问题']],
+      logic:['按当前上游约定检查 video_id、title、summary 的存在与类型。语义是否足够留到后面。','ASR/OCR 缺失用 null 或空列表表示，不填造内容。','时间若无法可靠解析为带时区的时间，记录未知与原始值，不默认使用今天。','将原始文本拆成可定位的 evidence_items；保留原始字段、片段定位和已知派生关系。','作者身份只继承平台提供的核验标志；没有标志就是 unknown。'],
+      failures:['核心必填字段缺失：INVALID_INPUT。将 title/summary 改为可选需要另行确认输入契约。','无效但可缺省的时间：记录 warning 后继续；不凭此丢弃整条视频。'],
+      boundaries:'字段齐全不等于事实可靠；程序不在此判断谁说的是真话。',
+      code:'checked = validate_input(run)\nif checked.status == "invalid":\n    return stop("INVALID_INPUT", checked.errors)\npacket = checked.packet'},
+    {id:'N02',name:'读取基础规则',lane:1,fn:'load_base_rules',phase:0,
+      purpose:'在理解之前提供常驻基础约束，并建立本次任务的正式规则上下文。',
+      input:'RuleReadRequest',output:'RuleBundle',from:'N01 的有效输入 + RunConfig',to:'N03；并保留给 N04 / N08 / N10',
+      inputs:[['version ← config.rule_version','RunConfig','本次固定版本'],['scope','常量 base','基础表达约束、证据规则、时效与归属的通用规则']],
+      outputs:[['version','string','本次实际读取版本'],['rules','Rule[]','rule_id、触发条件、动作、优先级、状态'],['hard_limits','HardLimits','20 字符、禁用字符等程序检查配置']],
+      logic:['流程层调用 T01 read_rules；工具从正式规则库读取。','读取失败时，仅可使用经过校验的同版本缓存；没有缓存就停止。','不可将 Memory 当作规则库替代。'],
+      failures:['必需规则不存在或版本不一致：RULES_UNAVAILABLE。'],
+      boundaries:'“读取规则”是工具；“决定读取哪一版本、失败后怎么走”属于流程控制。',
+      code:'base_rules = read_rules(version=run.config.rule_version, scope="base")\nrequire(base_rules.version == run.config.rule_version)'},
+    {id:'N03',name:'理解内容与整理证据',lane:2,fn:'understand_video',phase:1,wrapped:true,
+      purpose:'形成候选陈述、内容形态和证据关系。此时还不能把所有候选陈述当作可写事实。',
+      input:'UnderstandingInput',output:'Checked<Understanding>',from:'N01 VideoPacket + N02 RuleBundle',to:'通过公共校验 C02/C03 后 → N04',
+      inputs:[['packet','VideoPacket','原始标题、概括、ASR、OCR、作者及时间元数据'],['understanding_rules','Rule[]','区分陈述/观点/预测/演绎；保留证据出处']],
+      outputs:[['main_format','string | unknown','一个主形态，允许混合属性或不确定'],['attributes','string[]','新闻转述、剧情演绎、动态状态等规则触发标签'],['claims','Claim[]','claim_id、text、kind、evidence_refs、time_refs'],['extracted_sources','SourceRef[]','从材料中提取的出处；未核验不能标 verified'],['conflicts','Issue[]','已发现的材料冲突']],
+      logic:['先理解材料，再输出形态和候选陈述；避免先强制单一类别反过来扭曲理解。','把“作者认为原因是 X”与“原因就是 X”拆清楚。','只有文本时，区分文本描述画面与实际已核验的画面证据。','事件时间、原始出处必须附证据引用；提取不到记 unknown。','用公共包装器 C01→C02→C03 接收和验证结果。'],
+      failures:['结构错误 / 幻造 evidence_id：公共包装器有限重试；耗尽后 X01。','内容复杂但结构合法：保留不确定性，继续边界判定。'],
+      boundaries:'不因三段同源文本一致就认定事实已核实；不在此选择精彩标题。',
+      code:'understanding = checked_call(\n  node="N03", input={packet, base_rules},\n  schema=Understanding, refs=packet.evidence_items\n)'},
+    {id:'N04',name:'匹配适用规则',lane:1,fn:'match_rules',phase:1,
+      purpose:'根据已验证结构的内容属性，装配本条视频需要的正式规则。',
+      input:'RuleMatchInput',output:'ApplicableRules',from:'N03 Understanding + N01 Packet + N02 BaseRules',to:'N05；并保留给 N07 / N08',
+      inputs:[['domains','packet.content_domains','支持多领域'],['format / attributes','Understanding','模型提供特征，程序执行匹配'],['base_rules / version','RuleBundle','基础规则始终保留']],
+      outputs:[['rules','Rule[]','基础规则与匹配的领域/形态/特殊属性规则'],['match_trace','RuleMatch[]','每条规则由哪个属性触发'],['unresolved_conflicts','Issue[]','无法用明确优先级解决的规则冲突']],
+      logic:['用标签与确定性条件查询 T01，不由 Agent 自行挑选是否遵守。','未知属性采用已定义的通用边界；不可让 unknown 等同于低风险。','规则优先级必须显式配置；冲突未解决时停止相关生成，不能临时让模型“折中”。','边界判断若发现新的特殊属性，返回 RULE_SCOPE_GAP，人工修正规则范围；V1 不自动无限循环匹配。'],
+      failures:['必要规则缺失或冲突未解决：RULE_CONFLICT / RULE_SCOPE_GAP → X01。'],
+      boundaries:'规则匹配是确定性的，但它依赖的内容标签可能识别错误；评测必须覆盖漏触发。',
+      code:'applicable = match_rules(understanding, packet.content_domains, base_rules)\nif applicable.unresolved_conflicts:\n    return stop("RULE_CONFLICT")'},
+    {id:'N05',name:'确定可写边界',lane:2,fn:'bound_claims',phase:1,wrapped:true,
+      purpose:'按每条候选陈述判断可用性，落下时效、信源、归属、范围和确定程度的限制。',
+      input:'BoundaryInput',output:'Checked<BoundarySet>',from:'N03 Understanding + 原始证据 + N04 ApplicableRules',to:'C02/C03 结构通过后 → N06',
+      inputs:[['claims / evidence','Understanding + VideoPacket','候选陈述及原始证据，不只看概括'],['time_context','Packet + RunConfig','发布时间、事件时间、使用时间、有效期证据'],['source_context','Packet + Understanding','平台核验身份、原始出处、具体说法的证据'],['rules','ApplicableRules','正式的可写边界规则']],
+      outputs:[['decisions','ClaimDecision[]','每个 claim_id 恰好一个判定：usable / limited / excluded'],['required_limits','每条 decision 内','归属、时间、条件、范围等必须保留的语义'],['forbidden_inferences','每条 decision 内','不得增加的原因、结果、范围或当前状态'],['unresolved_issues','Issue[]','证据或规则范围仍未解决的问题']],
+      logic:['判断材料实际支持什么，不用作者头衔直接替代具体证据。','区分发布时间、事件时间、信息有效期；新发布也可能讲旧事件。','即使没有“近日”等词，“某地暂停开放”仍可能隐含当前状态；需要显式限定。','当事人称述、个人分析、预测保留归属与确定程度；“疑似/网传”不能作为未知来源的通行证。','画面只支持直接展示内容，不能自动推断原因、人数与结果。','身份核验、材料出处和当前有效性缺失时显式 unknown；不自主联网。'],
+      failures:['一部分陈述不可用：排除该部分，不整体一刀切。','核心陈述全部不可用：结构仍可合法，交给 N06 决定停止。','规则范围存在缺口：返回 issue，由 N06 转异常。'],
+      boundaries:'usable 仅表示按本方案可用于忠实表达；不等于完成了外部真实性核验。',
+      code:'boundary = checked_call(\n  node="N05", input={packet, understanding, applicable, reference_time},\n  schema=BoundarySet, refs={claim_ids, evidence_ids}\n)'},
+    {id:'N06',name:'可写信息路由',lane:1,fn:'route_boundary',phase:1,
+      purpose:'读取结构合格的业务判定，确定是否有信息可以交给看点节点。',
+      input:'BoundarySet',output:'BoundaryRoute',from:'N05 经 C02 验证后的对象',to:'continue → N07；stop → X01',
+      inputs:[['boundary.decisions','ClaimDecision[]','结构和引用已通过校验'],['blocking_issues','Issue[]','规则范围缺口等阻断原因']],
+      outputs:[['action','continue | stop','确定性的流程动作'],['eligible_claim_ids','string[]','usable 与 limited 的 ID'],['limits_by_claim','map','保留每个可用 claim 的必要限定'],['reason_code','string','CONTINUE / NO_USABLE_CLAIM / RULE_SCOPE_GAP']],
+      logic:['先检查阻断性规则问题；存在就 stop。','过滤 excluded；保留 usable 与 limited，并携带所有限定。','至少一个可用陈述才继续。','不重新评判事实真假，不将限定条件清空。'],
+      failures:['零可用信息：NO_USABLE_CLAIM；不去调用生成模型凑标题。'],
+      boundaries:'结构校验通过只能让路由读取对象；继续与否取决于对象中的业务结论。',
+      code:'eligible = [d for d in boundary.decisions if d.decision != "excluded"]\nreturn Continue(eligible) if eligible else Stop("NO_USABLE_CLAIM")'},
+    {id:'N07',name:'提炼可兑现的看点',lane:2,fn:'extract_highlights',phase:2,wrapped:true,
+      purpose:'从可写信息中寻找能代表视频实际交付的观看价值，建立看点与事实的对应关系。',
+      input:'HighlightInput',output:'Checked<HighlightSet>',from:'N06 可用信息 + 全片材料 + 适用规则',to:'C02/C03 通过后 → N08',
+      inputs:[['eligible_claims / limits','BoundaryRoute + BoundarySet','只能基于这些信息构造看点'],['content_context','VideoPacket + Understanding','用于判断主次与实际交付；未获授权信息不能写进标题'],['rules','ApplicableRules','代表性、兑现程度及形态策略']],
+      outputs:[['highlights','Highlight[]','highlight_id、claim_ids、观看价值、代表性依据、交付证据'],['primary_highlight_id','string | null','优先推荐的主看点'],['limits_by_highlight','map','各看点继承的必要限定；可由程序合并 claim 限定']],
+      logic:['判断主线与边角细节，避免把工具掉落包装成修复视频的核心事故。','看点必须落到具体内容和可兑现价值，不只输出“有趣/有用”。','每个看点绑定已允许的 claim_ids；看点本身引入新推断时应删除，不能绕开 N05。','不强凑三个看点；一个可信看点也可继续。','保留主看点及备选，但每条候选最终只围绕一个明确主看点组织。'],
+      failures:['没有代表性、可兑现看点：允许 highlights=[]，由 N08 停止。','引用 excluded 的 claim：公共校验失败。'],
+      boundaries:'“优先主看点”不要求三条候选机械重复；备选仍须代表视频。',
+      code:'highlights = checked_call(node="N07",\n  input={eligible_claims, limits, content_context, rules},\n  schema=HighlightSet, refs=eligible_claim_ids)'},
+    {id:'N08',name:'装配生成上下文',lane:1,fn:'prepare_generation',phase:2,
+      purpose:'将规则、事实、看点及限定整理成生成 Agent 可消费的唯一输入对象。',
+      input:'GenerationPrepareInput',output:'GenerationContext | Stop',from:'N07 + N05 + N04 + RunConfig',to:'有效上下文 → N09；无看点 → X01',
+      inputs:[['highlights','HighlightSet','含主看点与备选'],['claim_decisions / rules','BoundarySet + ApplicableRules','事实依据和正式约束'],['config','RunConfig','3 条目标、Memory 预算、20 字符等']],
+      outputs:[['allowed_claims','ClaimDecision[]','限定后的陈述，保留证据引用'],['highlights','Highlight[]','候选看点及主看点'],['rules / evidence_items','Rule[] / Evidence[]','实际规则内容和证据；不只传版本号'],['content_profile / reference_time','object / datetime','内容属性与当前使用时间'],['constraints','object','基础硬约束与按 claim/highlight 继承的限制'],['memory_policy','object','是否启用、最大调用次数、案例版本兼容要求']],
+      logic:['无看点则停止。','程序按 claim_ids 合并限定，生成模型不能自行丢弃条件。','保留已固定的规则版本、证据索引与任务 ID。','不把整个历史案例库塞入 Prompt；只给检索权限与边界。'],
+      failures:['限定存在无法解决的冲突：CONSTRAINT_CONFLICT。','NO_HIGHLIGHT：不再继续调用生成 Agent。'],
+      boundaries:'这是“装配输入”，不再悄悄做一轮事实推断。',
+      code:'if not highlights.highlights:\n    return stop("NO_HIGHLIGHT")\ncontext = prepare_generation(highlights, boundary, applicable, run.config)'},
+    {id:'N09',name:'选择策略并生成候选',lane:2,fn:'generate_agent',phase:3,wrapped:true,
+      purpose:'在已知边界内决定是否检索案例、选择主看点与写作动作，生成目标 3 条候选。',
+      input:'GenerationContext',output:'Checked<AgentDraft>',from:'N08；按需调用 T02',to:'C02/C03 通过后 → N10',
+      inputs:[['context','GenerationContext','可写信息、看点、规则、限定、预算'],['memory_results','MemoryResult[]','仅在自主调用 T02 后返回；不是当前视频事实']],
+      outputs:[['candidates','Candidate[]','文本、看点 ID、claim_ids、策略、使用案例 ID、轮次'],['memory_trace','MemoryTrace[]','检索条件、结果、采用/放弃原因'],['shortfall_reason','string | null','不足目标候选数时说明原因']],
+      logic:['G1 判断是否需要案例；G2 构造检索参数并调用 T02；G3 判断适用性与规则冲突。','G4 选择每条标题的一个主看点；优先真实看点差异，其次表达差异。','G5 选择条件触发的表达动作，保留时间、归属与范围；没有真实反差就不制造反差。','G6 生成候选并做轻量事实/语义自检；自检不能代替独立评审。','案例检索失败可退回正式规则；规则缺失不能由 Memory 填补。','生成不足或相同文案去重后允许少于 3 条，是本稿建议，待业务确认。'],
+      failures:['Memory 超时/无结果/冲突：不采用该案例，记录后继续。','模型返回无效结构：公共包装器有界重试；不得重置 Memory 预算。','无法生成任何候选：交 N11 终止；不凭空放宽约束。'],
+      boundaries:'不修改正式规则，不决定最终放行；案例可示范措辞，不可补充视频事实。',
+      code:'draft = checked_agent(context,\n  tools={"search_memory": budgeted_search},\n  schema=AgentDraft, retries=run.config.schema_retry_limit\n)\n# 同一任务共用检索预算，结构重试不重置预算'},
+    {id:'N10',name:'候选硬约束校验',lane:1,fn:'check_candidates',phase:3,
+      purpose:'检查程序能够精确判断的展示与引用要求，并保留不通过原因。',
+      input:'AgentDraft + GenerationContext',output:'CandidateCheck',from:'N09 经公共校验后的 AgentDraft',to:'N11',
+      inputs:[['candidates','Candidate[]','已解析的候选对象'],['hard_limits / valid_ids','GenerationContext','长度定义、符号规则、合法看点/事实/案例 ID']],
+      outputs:[['accepted','Candidate[]','通过程序硬约束，仍 pending_review'],['rejected','CandidateFailure[]','逐条给出 LENGTH / SYMBOL / DUPLICATE 等原因'],['checks_version','string','记录校验配置版本']],
+      logic:['本稿演示用 NFC 后 Unicode 码点数 ≤20；最终计数口径待确认。','按配置拦截表情、控制符、业务禁用符号。','检查候选 ID 唯一、引用有效、文本非空，去重重复文案。','不把“包含作者/年份”等字符串匹配当成语义限制已完整保留的证明。'],
+      failures:['单条失败：剔除并记录；其他候选可继续。','全部失败：N11 决定停止。本稿不隐藏新增的无限自修复循环。'],
+      boundaries:'该节点通过不代表事实准确、看点鲜明或人工会接受。',
+      code:'checks = check_candidates(draft, context.constraints)\n# checks.accepted 只能表示程序检查通过\n# 独立评审仍需核对原始证据与语义限定'},
+    {id:'N11',name:'候选交付路由',lane:1,fn:'route_candidates',phase:3,
+      purpose:'判断是否有候选可交给下一阶段评审，不做最终质量择优。',
+      input:'CandidateCheck + target_count',output:'CandidateRoute',from:'N10',to:'handoff → N12；stop → X01',
+      inputs:[['accepted / rejected','CandidateCheck','程序检查结果'],['target_count','RunConfig','本稿目标 3 条']],
+      outputs:[['action','handoff | stop','进入评审或终止'],['candidate_ids','string[]','本次可交付的候选 ID'],['shortfall','number','与目标数的差距；不是质量分'],['reason_code','string','READY_FOR_REVIEW / NO_VALID_CANDIDATE']],
+      logic:['accepted.length > 0 才交付。','保留 1–3 条候选的建议策略需要业务确认；不能写成已经确定。','这里没有评审分数，因此不声称“已选出最佳标题”。'],
+      failures:['零候选：NO_VALID_CANDIDATE → X01。'],
+      boundaries:'候选交付与上线发布是不同状态；V1 后续仍须独立评审和全量人工确认。',
+      code:'return Handoff(checks.accepted) if checks.accepted else Stop("NO_VALID_CANDIDATE")'},
+    {id:'N12',name:'输出待评审候选包',lane:0,fn:'build_candidate_batch',phase:3,
+      purpose:'将候选、证据、限定和运行记录一并交给独立评审接口。当前范围到此为止。',
+      input:'CandidateRoute + RunState',output:'CandidateBatch',from:'N11 + 当前任务已通过校验的状态',to:'后续独立评审 → 人工最终确认（本稿不展开）',
+      inputs:[['accepted_candidates','CandidateRoute','通过程序约束的候选'],['evidence / limits / rules','RunState','原始证据引用、边界、规则版本'],['trace','RunState','轮次、工具使用与错误记录']],
+      outputs:[['status','pending_review','不是 approved / published'],['candidates','Candidate[]','有效候选列表'],['review_context','object','原始证据、必要限定、规则版本'],['audit','object','run_id、节点状态、调用预算消耗与失败记录']],
+      logic:['评审端保留访问原始材料的能力，不仅复用上游整理的“事实答案”。','候选列表不能被包装成已验证业务收益。','发布、人工确认、评审重写属于后续链路；最多两轮业务重写不等于本阶段结构重试。'],
+      failures:['交付失败：保留任务结果并按幂等键 run_id 重试交付；不重新生成事实。该运行策略待确认。'],
+      boundaries:'这是方案及接口设计，HTML 中的模型返回都是构造样例。',
+      code:'return CandidateBatch(\n  status="pending_review", candidates=route.candidates,\n  review_context={raw_evidence, limits, rule_version}, audit=trace\n)'}
+  ],
+  tools:[
+    ['T01','read_rules','{version, scope, domains, format, attributes}','RuleBundle 或 ToolError','N02 / N04 的流程函数','正式规则库；只读'],
+    ['T02','search_memory','{query, domains, format, problem_types, rule_version, limit}','{cases:[Case], retrieval_id, status}','N09 Agent 经工具预算包装器调用','人工确认的 Case Memory；只读'],
+    ['T03','append_event','{run_id, node_id, attempt, status, input_refs, output_ref, error_code}','{event_id, status}','流程包装器在节点开始/结束时调用','运行日志；不写规则，不自动更新 Memory']
+  ],
+  assumptions:[
+    ['已确认','基础约束＋三个关键决策','可写边界 → 核心看点 → 表达策略与分寸；评审质量标准单列。'],
+    ['已确认','当前范围','视频信息输入到待评审候选输出；V1 保留全量人工最终确认。'],
+    ['已确认','20 字符、目标 3 候选','不能用评分抵消硬错误；事实不足时不强制生成。'],
+    ['建议方案','逻辑节点不等于调用次数','先保持 I/O 清晰、可单测；后续实验决定理解/边界/看点是否合并调用。'],
+    ['建议方案','结构重试 1 次、Memory 最多 2 次','用于演示的有界预算；与评审后的最多 2 轮业务重写分开计数。'],
+    ['待确认','时间与身份字段','数据是否实际提供 published_at、平台已核验身份、来源链接；缺失时必须 unknown。'],
+    ['待确认','时间有效性规则','哪些内容需要当前证据、近期窗口多大、动态状态何时失效、交付后是否需要重检。'],
+    ['待确认','信源准入条件','哪些机构/领域/信息类型允许直接陈述，哪些必须限定或不生成。不能只按账号身份判定。'],
+    ['待确认','字符计数和符号清单','演示按 NFC 后码点数计数；正式实现需对齐客户端显示与业务口径。'],
+    ['待确认','不足 3 条如何交付','建议保留 1–2 条有效候选并记录差额，避免为了凑数降低质量。'],
+    ['待确认','异常人工入口与审计策略','谁处理、是否有 SLA、日志失败是否阻断、任务重入幂等键。']
+  ]
+};
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const json=x=>JSON.stringify(x,null,2);
+const code=x=>`<pre class="code"><code>${esc(typeof x==='string'?x:json(x))}</code></pre>`;
+const table=(heads,rows)=>`<div class="table-wrap"><table><thead><tr>${heads.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+const list=xs=>`<ol class="list">${xs.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>`;
+const tabs=[['overview','总览与五泳道'],['nodes','逐节点 I/O'],['validation','校验与路由'],['trace','样例走读'],['contracts','数据契约与调用'],['rules','规则与待确认']];
+const phases=['任务与输入','决策一 · 能写什么','决策二 · 重点写什么','决策三 · 怎样表达'];
+let currentTab='overview',selectedNode=0,validationMode='ok',scenario='normal',traceIndex=0,contractIndex=0;
+const sampleVideo={video_id:'demo-001',title:'西河公园目前暂停开放',summary:'作者回顾2023年西河公园闭园，并分析排水因素。',author_intent:null,asr:'回顾2023年7月12日西河公园闭园。我觉得当时排水不足可能是原因之一。',ocr:[],content_domains:['本地事件'],author:{name:'城市记录者（构造）',identity_verification:'unknown',credentials:[]},published_at:'2024-06-18T10:00:00+08:00',event_time:null,source_metadata:[]};
+const sampleConfig={reference_time:'2026-10-29T18:00:00+08:00',timezone:'Asia/Taipei',rule_version:'design-0.2',target_count:3,schema_retry_limit:1,memory_call_limit:2,max_chars:20,char_count:'NFC_UNICODE_CODE_POINTS'};
+const evidences=[{evidence_id:'e00',field:'title',text:sampleVideo.title,locator:'title:0',derived_from:[]},{evidence_id:'e01',field:'asr',text:'回顾2023年7月12日西河公园闭园。',locator:'asr:0-23',derived_from:[]},{evidence_id:'e02',field:'asr',text:'我觉得当时排水不足可能是原因之一。',locator:'asr:23-end',derived_from:[]},{evidence_id:'e03',field:'summary',text:sampleVideo.summary,locator:'summary:0',derived_from:['e01','e02']}];
+const claims=[{claim_id:'c1',text:'作者回顾2023年7月12日西河公园闭园',kind:'attributed_report',evidence_refs:['e01'],time_refs:['e01']},{claim_id:'c2',text:'作者推测当时排水不足可能是原因之一',kind:'opinion',evidence_refs:['e02'],time_refs:['e02']},{claim_id:'c3',text:'西河公园目前暂停开放',kind:'dynamic_status',evidence_refs:['e00'],time_refs:[]}];
+const ruleIds=['B-FACT','B-TIME','B-SOURCE','D-NEWS','B-LENGTH'];
+const sampleBoundary={decisions:[
+{claim_id:'c1',supported_statement:'作者回顾2023年西河公园闭园',decision:'limited',evidence_refs:['e01'],required_limits:['保留2023年的历史范围','保留作者回顾的归属'],forbidden_inferences:['不得表达当前仍闭园','不得声称已外部核实'],rule_ids:['B-TIME','B-SOURCE'],reason:'往期叙述，无当前状态依据。'},
+{claim_id:'c2',supported_statement:'作者推测2023年闭园可能与排水不足有关',decision:'limited',evidence_refs:['e02'],required_limits:['保留作者分析/推测的归属','保留2023年的事件范围','不把可能原因改为确定原因'],forbidden_inferences:['不得断言排水不足已被证实是原因'],rule_ids:['B-FACT','B-SOURCE'],reason:'材料仅提供作者分析，不构成确定因果证据。'},
+{claim_id:'c3',supported_statement:null,decision:'excluded',evidence_refs:['e00'],required_limits:[],forbidden_inferences:['不得沿用当前闭园状态'],rule_ids:['B-TIME'],reason:'原标题含当前状态断言，材料只有往期叙述。'}],unresolved_issues:[]};
+
+// 教学用边界输出校验。它验证格式与可引用关系，不证明语义为真。
+function validateBoundaryReply(reply,ctx){
+  const errors=[];
+  if(reply.status!=='ok')return {status:'invalid',value:null,errors:[{path:'$',code:'MODEL_CALL_ERROR',message:reply.error||'调用失败'}],retryable:reply.retryable===true};
+  let value;try{value=JSON.parse(reply.raw_text)}catch(e){return {status:'invalid',value:null,errors:[{path:'$',code:'INVALID_JSON',message:'无法解析 JSON'}],retryable:true}}
+  const fail=(path,code,message)=>errors.push({path,code,message});
+  if(!value||typeof value!=='object'||Array.isArray(value))fail('$','TYPE','需要对象');
+  const ds=value?.decisions;
+  if(!Array.isArray(ds))fail('decisions','TYPE','需要数组');
+  const allowedClaims=new Set(ctx.claim_ids),allowedEvidence=new Set(ctx.evidence_ids),allowedRules=new Set(ctx.rule_ids),seen=new Set();
+  if(Array.isArray(ds))ds.forEach((d,i)=>{
+    const p=`decisions[${i}]`;
+    if(!d||typeof d!=='object'||Array.isArray(d)){fail(p,'TYPE','需要对象');return}
+    if(!allowedClaims.has(d.claim_id))fail(p+'.claim_id','UNKNOWN_CLAIM','claim_id 不存在');
+    if(seen.has(d.claim_id))fail(p+'.claim_id','DUPLICATE_CLAIM','每条陈述只能一个判定');
+    seen.add(d.claim_id);
+    if(!['usable','limited','excluded'].includes(d.decision))fail(p+'.decision','ENUM','只能为 usable / limited / excluded');
+    for(const field of ['evidence_refs','required_limits','forbidden_inferences','rule_ids'])if(!Array.isArray(d[field])||d[field].some(x=>typeof x!=='string'))fail(p+'.'+field,'TYPE','需要字符串数组');
+    if(Array.isArray(d.evidence_refs)){if(!d.evidence_refs.length)fail(p+'.evidence_refs','EMPTY_EVIDENCE','需要引用判定依据');d.evidence_refs.forEach(id=>{if(!allowedEvidence.has(id))fail(p+'.evidence_refs','UNKNOWN_EVIDENCE',`${id} 不存在`)})}
+    if(Array.isArray(d.rule_ids))d.rule_ids.forEach(id=>{if(!allowedRules.has(id))fail(p+'.rule_ids','UNKNOWN_RULE',`${id} 不是已加载规则`)});
+    if(d.decision!=='excluded'&&(typeof d.supported_statement!=='string'||!d.supported_statement.trim()))fail(p+'.supported_statement','REQUIRED','可用陈述需要明确内容');
+    if(d.decision==='excluded'&&d.supported_statement!==null&&typeof d.supported_statement!=='string')fail(p+'.supported_statement','TYPE','需要 string 或 null');
+    if(d.decision==='limited'&&(!Array.isArray(d.required_limits)||!d.required_limits.length))fail(p+'.required_limits','EMPTY_LIMITS','有限定的陈述必须给出限定');
+    if(typeof d.reason!=='string'||!d.reason.trim())fail(p+'.reason','REQUIRED','需要简短依据');
+  });
+  ctx.claim_ids.forEach(id=>{if(!seen.has(id))fail('decisions','MISSING_CLAIM',`${id} 没有判定`)});
+  if(!Array.isArray(value?.unresolved_issues))fail('unresolved_issues','TYPE','需要数组');
+  return errors.length?{status:'invalid',value:null,errors,retryable:true}:{status:'ok',value,errors:[],retryable:false};
+}
+function routeCheck(check,attempt,limit){
+  if(check.status==='ok')return {action:'advance',payload:check.value,reason_code:'STRUCTURE_VALID'};
+  if(check.retryable&&attempt<limit)return {action:'retry_same_node',next_attempt:attempt+1,reason_code:'RETRYABLE_OUTPUT_ERROR',errors:check.errors};
+  return {action:'stop',reason_code:'NODE_FAILED',errors:check.errors};
+}
+function routeBoundary(boundary){
+  if(boundary.unresolved_issues.some(x=>x.blocking))return {action:'stop',reason_code:'RULE_SCOPE_GAP',eligible_claim_ids:[],limits_by_claim:{}};
+  const ds=boundary.decisions.filter(d=>d.decision!=='excluded');
+  return {action:ds.length?'continue':'stop',reason_code:ds.length?'CONTINUE':'NO_USABLE_CLAIM',eligible_claim_ids:ds.map(d=>d.claim_id),limits_by_claim:Object.fromEntries(ds.map(d=>[d.claim_id,d.required_limits]))};
+}
+function checkCandidates(candidates,maxChars){
+  const seen=new Set(),accepted=[],rejected=[];
+  for(const c of candidates){const text=c.headline.normalize('NFC'),n=[...text].length,reasons=[];
+    if(!text.trim())reasons.push('EMPTY');if(n>maxChars)reasons.push('LENGTH');
+    // 仅为演示清单；生产禁用符号应由业务配置。
+    if(/[^\p{L}\p{N}，。！？、：；“”‘’（）《》·\- ]/u.test(text))reasons.push('SYMBOL');
+    if(seen.has(text))reasons.push('DUPLICATE');seen.add(text);
+    if(reasons.length)rejected.push({candidate_id:c.candidate_id,reasons,char_count:n});else accepted.push({...c,headline:text,char_count:n,status:'pending_review'});
+  }return {accepted,rejected,checks_version:'design-0.2'};
+}
+const clone=x=>JSON.parse(JSON.stringify(x));
+function validationContext(){return {claim_ids:claims.map(c=>c.claim_id),evidence_ids:evidences.map(e=>e.evidence_id),rule_ids:ruleIds}}
+function runDemo(mode='normal'){
+  const trace=[],add=(id,input,output,note='')=>trace.push({id,input:clone(input),output:clone(output),note});
+  const run={run_id:'run-demo-001',request:{video:clone(sampleVideo)},config:clone(sampleConfig)};add('N00',{request:run.request,config:run.config},run);
+  const packet={video_id:sampleVideo.video_id,evidence_items:clone(evidences),content_domains:sampleVideo.content_domains,author:sampleVideo.author,published_at:sampleVideo.published_at,event_time:null,source_metadata:[],author_intent:sampleVideo.author_intent};
+  add('N01',run,{status:'ok',packet,warnings:[{code:'SOURCE_UNKNOWN',field:'source_metadata'}],errors:[]});
+  const base={version:'design-0.2',rules:ruleIds.filter(x=>x!=='D-NEWS').map(rule_id=>({rule_id,status:'design'})),hard_limits:{max_chars:20,char_count:'NFC_UNICODE_CODE_POINTS'}};add('N02',{version:run.config.rule_version,scope:'base'},base,'T01 从正式规则库读取；示例规则为设计占位。');
+  const understanding={main_format:'往期事件分析',attributes:['retrospective','opinion','dynamic_status_conflict'],claims:clone(claims),event_times:[{claim_ids:['c1','c2'],value:'2023-07-12',evidence_refs:['e01']}],extracted_sources:[],conflicts:[{code:'TITLE_VS_EVENT_TIME',evidence_refs:['e00','e01']}]};
+  add('N03',{packet,understanding_rules:base.rules},understanding,'语义内容预置；生产必须经 C01/C02/C03。这里不声称执行了真实视频理解。');
+  const applicable={version:'design-0.2',rules:ruleIds.map(rule_id=>({rule_id,status:'design'})),match_trace:[{rule_id:'D-NEWS',trigger:'本地事件 + dynamic_status_conflict'}],unresolved_conflicts:[]};add('N04',{domains:packet.content_domains,format:understanding.main_format,attributes:understanding.attributes,base_rules:base},applicable);
+  const boundary=clone(sampleBoundary);
+  if(mode==='no_usable')boundary.decisions.forEach(d=>{d.decision='excluded';d.supported_statement=null;d.required_limits=[];d.reason='构造分支：该陈述的核心证据不足。'});
+  const attempts=[];let checked,decision;
+  for(let attempt=0;attempt<=run.config.schema_retry_limit;attempt++){
+    const raw=mode==='schema_retry'&&attempt===0?'{"decisions":':json(boundary);
+    const reply={status:'ok',raw_text:raw};checked=validateBoundaryReply(reply,validationContext());decision=routeCheck(checked,attempt,run.config.schema_retry_limit);attempts.push({attempt,reply,check:checked,route:decision});if(decision.action!=='retry_same_node')break;
+  }
+  add('N05',{claims:understanding.claims,evidence:packet.evidence_items,time_context:{published_at:packet.published_at,event_times:understanding.event_times,reference_time:run.config.reference_time},author:packet.author,source_context:{metadata:packet.source_metadata,extracted:understanding.extracted_sources},content_attributes:{main_format:understanding.main_format,attributes:understanding.attributes},rules:applicable},checked.value,'时效与信源按 claim 判定；格式错误重试不等于业务重写。');
+  trace[trace.length-1].call_trace=clone(attempts);
+  if(decision.action==='stop'){add('X01',{node_id:'N05',errors:checked.errors},{status:'stopped',node_id:'N05',reason_code:'NODE_FAILED',errors:checked.errors});return trace}
+  const routed=routeBoundary(checked.value);add('N06',checked.value,routed,'C02 检查结构，N06 读取结构合法的业务结论并选择路径。');
+  if(routed.action==='stop'){add('X01',routed,{status:'stopped',node_id:'N06',reason_code:routed.reason_code,errors:[],manual_queue:'待业务定义'});return trace}
+  const highlights={highlights:[{highlight_id:'h1',claim_ids:['c1'],value:'回顾往期闭园事件',representativeness:'回顾构成视频主体',delivery_evidence_refs:['e01']},{highlight_id:'h2',claim_ids:['c1','c2'],value:'理解作者对往期闭园原因的分析',representativeness:'作者分析为主要内容之一',delivery_evidence_refs:['e01','e02']}],primary_highlight_id:'h1'};
+  add('N07',{eligible_claim_ids:routed.eligible_claim_ids,limits_by_claim:routed.limits_by_claim,content_context:{packet,understanding},rules:applicable},highlights,'看点内容为构造模型输出；不是自动测得的代表性结论。');
+  const context={run_id:run.run_id,reference_time:run.config.reference_time,content_profile:{domains:packet.content_domains,main_format:understanding.main_format,attributes:understanding.attributes},rules:applicable.rules,evidence_items:packet.evidence_items,allowed_claims:checked.value.decisions.filter(d=>d.decision!=='excluded'),highlights:highlights.highlights,primary_highlight_id:highlights.primary_highlight_id,constraints:{max_chars:20,char_count:'NFC_UNICODE_CODE_POINTS',forbidden_symbols:['表情','控制符','业务禁用符号（正式清单待确认）'],limits_by_highlight:{h1:routed.limits_by_claim.c1,h2:[...new Set([...routed.limits_by_claim.c1,...routed.limits_by_claim.c2])]}},rule_version:applicable.version,memory_policy:{enabled:true,max_calls:2},target_count:3};add('N08',{highlights,boundary:checked.value,applicable,config:run.config},context);
+  const memoryTrace=mode==='memory_fail'?[{call_index:1,query:{problem_types:['旧闻当前化','观点事实化'],rule_version:'design-0.2'},status:'timeout',used_case_ids:[],fallback:'formal_rules_only'}]:[{decision:'skip',reason:'当前已加载规则足以指导本构造样例',used_case_ids:[]}];
+  const draft={candidates:[{candidate_id:'a1',headline:'作者回顾2023年西河公园闭园',highlight_id:'h1',claim_ids:['c1'],expression_strategy:'历史事件直述',used_case_ids:[],generation_round:0},{candidate_id:'a2',headline:'作者分析2023年公园闭园原因',highlight_id:'h2',claim_ids:['c1','c2'],expression_strategy:'保留分析归属',used_case_ids:[],generation_round:0},{candidate_id:'a3',headline:'作者谈2023年公园闭园与排水',highlight_id:'h2',claim_ids:['c1','c2'],expression_strategy:'突出讨论对象，避免确定因果',used_case_ids:[],generation_round:0}],memory_trace:memoryTrace,shortfall_reason:null};
+  add('N09',context,draft,'候选文字预置；未经过独立语义评审。Memory 失败时不补造案例。');
+  const hard=checkCandidates(draft.candidates,20);add('N10',{draft,context},hard,'本地真实执行字符计数、符号与重复检查；不判断语义真伪。');
+  const candidateRoute={action:hard.accepted.length?'handoff':'stop',candidate_ids:hard.accepted.map(c=>c.candidate_id),shortfall:Math.max(0,context.target_count-hard.accepted.length),reason_code:hard.accepted.length?'READY_FOR_REVIEW':'NO_VALID_CANDIDATE'};add('N11',{checks:hard,target_count:context.target_count},candidateRoute);
+  if(candidateRoute.action==='stop'){add('X01',candidateRoute,{status:'stopped',node_id:'N11',reason_code:'NO_VALID_CANDIDATE',errors:[]});return trace}
+  const output={run_id:run.run_id,video_id:packet.video_id,status:'pending_review',candidates:hard.accepted,review_context:{evidence_items:packet.evidence_items,boundary:checked.value,rule_version:applicable.version},audit:{node_ids:trace.map(t=>t.id),memory_calls:mode==='memory_fail'?1:0,schema_retries:mode==='schema_retry'?1:0}};
+  add('N12',{route:candidateRoute,candidates:hard.accepted,review_context:output.review_context},output,'下一阶段：独立评审与人工确认。此处没有发布动作。');return trace;
+}
+
+function overview(){return `<h2 class="section-title">先看决策，再看执行。</h2><p class="lede">基础约束贯穿全过程；三个关键决策依次收窄生成空间。泳道表示谁执行，数据契约表示传什么，路由表示接下来去哪。</p><div class="grid3">${[['01','确定可写边界','N03–N06','每条陈述 → 可用 / 限定可用 / 排除','时效、信源、内容性质、证据与确定程度'],['02','选择核心看点','N07–N08','可写信息 → 主看点与备选、兑现依据','代表性、观看价值、主次、实际交付'],['03','选择表达策略与分寸','N09–N12','看点与限定 → 待评审候选','条件触发的写作动作、语气、悬念与整体预期']].map(x=>`<div class="decision"><span class="eyebrow">${x[0]} · ${x[2]}</span><b>${x[1]}</b><div>${x[3]}</div><p>${x[4]}</p></div>`).join('')}</div><div class="notice"><strong>基础约束：</strong>正确、清楚地表达已确定的信息；不改变主体、关系、否定、归属和必要条件。难判断不代表可以妥协。吸引力等评审标准另列，不能抵消硬错误。</div><div class="row spread"><h3>生成阶段主链路</h3><button data-open="N00">从 N00 查看每一步 I/O</button></div><div class="flow">${phases.map((p,i)=>`<div class="phase"><div class="phase-label">${p}</div>${DOC.nodes.filter(n=>n.phase===i).map(n=>`<button class="step" data-open="${n.id}"><span class="id">${n.id}</span><span>${n.name}<small>${DOC.lanes[n.lane]}${n.wrapped?' · 含公共调用包装器':''}</small></span></button>`).join('')}</div>`).join('')}</div><p class="phase-note">主链路按 N00 → N12 顺序读取。模型节点内部均包含 C01 调用 → C02 校验 → C03 结果路由；异常进入 X01。逻辑节点数量不等于最终模型调用次数。</p><h3>五泳道：责任地图</h3><p class="small">表格按阶段分组；完整时序与条件在节点详情中。数据层提供读写依赖，不作为业务顺序节点。</p><div class="table-wrap"><table class="lane-table"><thead><tr><th>执行职责</th>${phases.map(p=>`<th>${p}</th>`).join('')}</tr></thead><tbody>${DOC.lanes.map((lane,l)=>`<tr><th>${l+1} · ${lane}</th>${phases.map((p,phase)=>{let body=DOC.nodes.filter(n=>n.phase===phase&&n.lane===l).map(n=>`<button data-open="${n.id}">${n.id} ${n.name}</button>`).join('');if(l===1&&phase>0)body+='<span class="small">C02 结构校验 / C03 调用路由</span>';if(l===3)body=phase===0?'T01 read_rules<br>T03 append_event':phase===1?'C01 call_model<br>T01 read_rules<br>T03 append_event':phase===2?'C01 call_model<br>T03 append_event':'C01 call_model<br>T02 search_memory<br>T03 append_event';if(l===4)body=phase===0?'原始视频 / 正式规则库':phase===1?'原始证据 / 正式规则库':phase===2?'当前任务状态 / 规则版本':'Case Memory / 生成记录';return `<td class="${l===4?'data-cell':''}">${body||'—'}</td>`}).join('')}</tr>`).join('')}</tbody></table></div><h3>三种“通过”不能混用</h3>${table(['状态','说明','仍不能说明'],[['结构校验通过','程序能够安全读取返回对象，引用合法','证据足以支持结论、标题没有误导'],['候选硬约束通过','长度、符号和可检查引用符合约定','事实准确、看点代表性、语气适当'],['pending_review','已经形成可交给评审的候选包','人工认可或已经发布']])}`}
+
+function nodeDetail(){const n=DOC.nodes[selectedNode];return `<div class="mobile-select select-field"><label for="nodeSelect">选择节点</label><select id="nodeSelect">${DOC.nodes.map((x,i)=>`<option value="${i}" ${i===selectedNode?'selected':''}>${x.id} ${x.name}</option>`).join('')}</select></div><div class="details-layout"><aside class="side" aria-label="节点目录">${phases.map((p,i)=>`<div class="group">${p}</div>${DOC.nodes.filter(x=>x.phase===i).map(x=>`<button data-node="${x.id}" class="${x.id===n.id?'active':''}">${x.id} ${x.name}</button>`).join('')}`).join('')}<button data-tab="validation">↳ C01/C02/C03 公共包装器</button></aside><article class="panel"><div class="meta"><span class="tag green">${n.id}</span><span class="tag">${DOC.lanes[n.lane]}</span><span class="tag">${n.wrapped?'模型 / Agent · 经校验后写入状态':'确定性执行'}</span></div><h2 class="section-title">${n.name}</h2><p class="lede">${n.purpose}</p><code class="mono">${n.fn}(…)</code><div class="bridge"><div><span class="small">输入对象</span><code>${esc(n.input)}</code><p>来自：${esc(n.from)}</p></div><div class="arrow">→</div><div><span class="small">输出对象</span><code>${esc(n.output)}</code><p>去向：${esc(n.to)}</p></div></div><h3>输入：字段从哪里来</h3>${table(['字段 / 参数','生产者或类型','本节点如何使用'],n.inputs)}<h3>输出：下游实际收到什么</h3>${table(['字段','类型 / 枚举','含义'],n.outputs)}<h3>内部处理顺序</h3>${list(n.logic)}<div class="notice"><strong>权限边界：</strong>${esc(n.boundaries)}</div><h3>失败、缺失与降级</h3>${list(n.failures)}<h3>调用关系 · 示意代码</h3>${code(n.code)}${n.wrapped?'<p class="small">checked_call / checked_agent 返回已经通过结构与引用校验的业务对象；失败则显式 Retry 或 Stop。它们不自动证明语义判断正确。</p><button data-tab="validation">展开 C01 → C02 → C03 的输入输出</button>':''}<div class="row spread controls"><button id="prevNode" ${selectedNode===0?'disabled':''}>← 上一节点</button><button id="nodeTrace">在构造样例中查看 ${n.id}</button><button id="nextNode" ${selectedNode===DOC.nodes.length-1?'disabled':''}>下一节点 →</button></div></article></div>`}
+
+function validationScenario(mode){let value=clone(sampleBoundary),reply;
+  if(mode==='all_excluded')value.decisions.forEach(d=>{d.decision='excluded';d.supported_statement=null;d.required_limits=[]});
+  if(mode==='enum')value.decisions[0].decision='probably';
+  if(mode==='ref')value.decisions[0].evidence_refs=['e999'];
+  if(mode==='semantic'){value.decisions[2]={...value.decisions[2],decision:'usable',supported_statement:'西河公园现在仍然暂停开放',required_limits:[],forbidden_inferences:[],reason:'错误的模型断言：旧材料被当成当前依据。'}}
+  reply={status:'ok',raw_text:json(value)};
+  const check=validateBoundaryReply(reply,validationContext()),route=routeCheck(check,0,1),business=route.action==='advance'?routeBoundary(route.payload):{action:'not_run',reason_code:'WAIT_FOR_VALID_OBJECT'};
+  return {reply,check,route,business};
+}
+function validationView(){const r=validationScenario(validationMode);return `<h2 class="section-title">“校验输出”的输入，到底是什么？</h2><p class="lede">它的输入是模型调用返回值 ModelReply，加上预期 Schema、合法引用集合和原始上下文。输出是 CheckResult。接收和返回数据的都是函数，不是“输入层”和“输出层”。</p><div class="checks"><div class="checkbox"><div class="checktop">C01 · 模型调用包装器</div><div class="checktitle">调用并接收</div><code>ModelRequest → ModelReply</code><p class="small">工具包装器发送请求；智能处理层执行语义任务。超时也转成明确错误对象。</p></div><div class="checkbox"><div class="checktop">C02 · 流程控制层</div><div class="checktitle">校验返回对象</div><code>ModelReply + Schema + RefContext → CheckResult</code><p class="small">解析 JSON，校验类型、枚举、ID 引用与覆盖；不自动判断语义正确。</p></div><div class="checkbox"><div class="checktop">C03 · 流程控制层</div><div class="checktitle">路由调用结果</div><code>CheckResult + RetryBudget → CallRoute</code><p class="small">advance / retry_same_node / stop。有效业务对象才允许进入任务状态。</p></div></div><h3>每条连线的完整契约</h3>${table(['步骤','输入','输出','谁消费输出'],[['C01 call_model','prompt + payload + model_config + attempt','ModelReply = ok(raw_text) 或 error(code,retryable)','C02 validate_reply'],['C02 validate_reply','ModelReply + expected_schema + allowed_ids','CheckResult = ok(value) 或 invalid(errors,retryable)','C03 route_check'],['C03 route_check','CheckResult + attempt + retry_limit','advance(payload) / retry_same_node / stop','流程编排器'],['状态提交','仅 advance.payload','RunState.boundary = BoundarySet','N06 route_boundary'],['N06 业务路由','BoundarySet','continue(eligible) / stop(reason)','N07 或 X01']])}<div class="notice"><strong>两个路由不重复：</strong>C03 判断“这次调用有没有返回可读取的对象”；N06 判断“这个对象里是否还有可用信息”。全是 excluded 的合法对象，能通过 C03，却会在 N06 停止。</div><div class="select-field controls"><label for="validationMode">切换返回情况</label><select id="validationMode">${[['ok','正常：两条限定可用'],['all_excluded','业务不可用：结构合法但全部排除'],['enum','格式错误：decision 枚举非法'],['ref','引用错误：e999 不存在'],['semantic','语义错误：结构合法却把旧闻写成当前']].map(([v,l])=>`<option value="${v}" ${v===validationMode?'selected':''}>${l}</option>`).join('')}</select></div><div aria-live="polite"><div class="statusbar"><span class="tag ${r.check.status==='ok'?'green':'amber'}">C02：${r.check.status}</span><span>→</span><span class="tag">C03：${r.route.action}</span><span>→</span><span class="tag">N06：${r.business.action}</span></div>${validationMode==='semantic'?'<div class="notice error"><strong>这个例子故意放入错误结论。</strong>程序可以发现引用 ID 不存在，却无法仅凭 ID 存在证明“现在仍闭园”。它会让这个结构合法的错误继续进入后续链路，这正是独立语义评审、原始证据复核与人工确认仍然必要的原因。</div>':''}<div class="twocol"><div><h3>C01 的原始返回</h3>${code(r.reply)}</div><div><h3>C02 的校验结果</h3>${code(r.check.status==='ok'?{status:'ok',value:'BoundarySet（与左侧解析后的对象相同）',errors:[],retryable:false}:r.check)}<h3>C03 的动作</h3>${code(r.route.action==='advance'?{action:r.route.action,payload:'经过校验的 BoundarySet',reason_code:r.route.reason_code}:r.route)}<h3>N06 的业务路由</h3>${code(r.business)}</div></div></div><h3>重试只修哪一类问题？</h3>${table(['情况','是否可走结构重试','本稿行为'],[['JSON 无法解析 / 字段缺失 / 非法枚举 / 非法引用','可以；示例上限 1 次，待确认','相同节点接收原始输入＋明确错误；重新返回完整对象，再校验'],['超时等暂时性调用错误','视错误类型与预算','可重试；认证/配置错误直接停止'],['所有事实均不可用','不可以伪装成格式问题','走业务停止，不反复调用直到模型说可用'],['评审发现事实误导 / 看点不合格','属于后续业务重写','使用评审反馈，最多额外 2 轮；本稿不展开'],['Memory 检索失败','不必让整条生成停止','正式规则完整时可降级；预算按任务累计']])}<details><summary>查看本页实际运行的边界校验函数</summary>${code(validateBoundaryReply.toString())}</details><details><summary>查看实际运行的两个路由函数</summary>${code(routeCheck.toString()+'\n\n'+routeBoundary.toString())}</details>`}
+
+function traceView(){const trace=runDemo(scenario);traceIndex=Math.min(traceIndex,trace.length-1);const t=trace[traceIndex],n=DOC.nodes.find(x=>x.id===t.id);return `<h2 class="section-title">跟着同一条视频，走过每个函数。</h2><p class="lede">构造视频：2024 年发布，回顾 2023 年闭园事件，包含作者的原因分析；原标题却写“目前暂停开放”。本次准备使用标题的时间为 2026-10-29。</p><div class="notice warn">这里的语义判断和候选文本是预置样例；边界输出校验、路由、长度与重复检查真实执行。最终状态只能是 pending_review，不能代表文案已被确认合格。</div><div class="select-field controls"><label for="scenario">分支场景</label><select id="scenario">${[['normal','正常：保留历史范围与观点归属'],['no_usable','证据不足：没有可用信息，提前停止'],['schema_retry','首次 JSON 错误：重试一次后继续'],['memory_fail','Memory 超时：退回正式规则']].map(([v,l])=>`<option value="${v}" ${v===scenario?'selected':''}>${l}</option>`).join('')}</select></div><div class="trace-list" aria-label="样例执行步骤">${trace.map((x,i)=>`<button data-trace="${i}" class="${i===traceIndex?'active':''}">${x.id}${x.id==='X01'?' 停止':''}</button>`).join('')}</div><section class="panel" aria-live="polite"><div class="meta"><span class="tag green">步骤 ${traceIndex+1} / ${trace.length}</span><span class="tag">${t.id}</span><span class="tag">${n?DOC.lanes[n.lane]:'流程控制层'}</span></div><h3 class="result-title">${n?n.name:'X01 · 显式终止 / 人工异常入口'}</h3>${t.note?`<p class="lede">${esc(t.note)}</p>`:''}<div class="twocol"><div><h4>函数收到的输入</h4>${code(t.input)}</div><div><h4>函数返回的输出</h4>${code(t.output)}</div></div>${t.call_trace?`<details><summary>展开本节点的模型原始返回、C02 校验与 C03 路由日志</summary>${code(t.call_trace)}</details>`:''}<div class="row spread controls"><button id="tracePrev" ${traceIndex===0?'disabled':''}>← 上一步</button>${n?`<button data-open="${t.id}">打开节点定义</button>`:''}<button id="traceNext" ${traceIndex===trace.length-1?'disabled':''}>下一步 →</button></div></section><h3>沿途保持的三个约束</h3>${table(['约束','产生位置','传递到哪里'],[['2023 年历史范围，不能暗示当前状态','N05 对 c1/c2/c3 的时间判定','N06 → N07 → N08 → N09 → N12.review_context'],['原因属于作者分析，不是已核实因果','N05 对 c2 的信源与确定程度判定','h2 继承限定 → 候选 a2/a3 → 独立评审'],['c3 的“目前暂停开放”被排除','N05 decision=excluded','N06 过滤；不得成为后续看点和候选的 claim 引用']])}`}
+
+const contracts=[
+['运行与原始输入',`type Issue = { code: string; path?: string; message?: string; blocking?: boolean };
+type RunConfig = {
+  reference_time: string; timezone: string; rule_version: string;
+  target_count: 3; max_chars: 20;
+  schema_retry_limit: number; memory_call_limit: number;
+  char_count: "NFC_UNICODE_CODE_POINTS"; // 本稿建议，待确认
+};
+type RawVideo = {
+  video_id: string; title: string; summary: string;
+  asr: string | null; ocr: string[];
+  author_intent: string | null; content_domains: string[];
+  author: { name: string | null; identity_verification: "verified" | "unverified" | "unknown";
+            credentials: {value:string; verified:boolean|null; evidence_ref?:string}[] };
+  published_at: string | null; event_time: string | null;
+  source_metadata: SourceRef[];
+};
+type SourceRef = { source_id: string; name: string|null; url: string|null;
+  verification: "verified"|"unverified"|"unknown"; evidence_refs: string[] };
+type TaskRequest = { video: RawVideo };
+type RunInput = { run_id: string; request: TaskRequest; config: RunConfig };
+type Evidence = { evidence_id: string; field: string; text: string;
+  locator: string | null; derived_from: string[] };
+type VideoPacket = {
+  video_id: string; evidence_items: Evidence[]; content_domains: string[];
+  author: RawVideo["author"]; published_at: string|null; event_time: string|null;
+  source_metadata: SourceRef[]; author_intent:string|null;
+};
+type InputCheck =
+  | {status:"ok"; packet:VideoPacket; warnings:Issue[]; errors:[]}
+  | {status:"invalid"; packet:null; warnings:Issue[]; errors:Issue[]};`],
+['规则与理解对象',`type Rule = {
+  rule_id: string; version: string; status: "active"|"retired"|"design";
+  applicable_stages: string[]; trigger: object; action: object;
+  priority: number; kind: "hard"|"preference"; source: string;
+  examples: {positive:string[]; negative:string[]};
+};
+type HardLimits = {max_chars:number; char_count:string; forbidden_symbols:string[]};
+type RuleReadRequest = {version:string; scope:string; domains?:string[];
+  format?:string; attributes?:string[]};
+type RuleBundle = {version:string; rules:Rule[]; hard_limits:HardLimits};
+type Claim = {
+  claim_id: string; text: string;
+  kind: "observation"|"attributed_report"|"opinion"|"prediction"|"fiction"|"dynamic_status"|"unknown";
+  evidence_refs: string[]; time_refs: string[];
+};
+type Understanding = {
+  main_format: string; attributes: string[]; claims: Claim[];
+  event_times: {claim_ids:string[]; value:string|null; evidence_refs:string[]}[];
+  extracted_sources: SourceRef[]; conflicts: Issue[];
+};
+type UnderstandingInput = {packet:VideoPacket; understanding_rules:Rule[]};
+type RuleMatchInput = {domains:string[]; format:string; attributes:string[]; base_rules:RuleBundle};
+type ApplicableRules = {version:string; rules:Rule[];
+  match_trace:{rule_id:string;trigger:string}[]; unresolved_conflicts:Issue[]};
+// 原始材料与正式规则保留在 RunState；不被模型新对象覆盖。
+// 规则采用哪个版本、按什么优先级解决冲突，都需要程序明确执行。`],
+['可写边界与看点',`type ClaimDecision = {
+  claim_id: string; supported_statement: string|null;
+  decision: "usable"|"limited"|"excluded";
+  evidence_refs: string[]; required_limits: string[];
+  forbidden_inferences: string[]; rule_ids: string[]; reason: string;
+};
+type BoundarySet = {decisions:ClaimDecision[]; unresolved_issues:Issue[]};
+type BoundaryInput = {
+  claims:Claim[]; evidence:Evidence[]; author:RawVideo["author"];
+  time_context:{published_at:string|null; event_times:Understanding["event_times"]; reference_time:string};
+  source_context:{metadata:SourceRef[];extracted:SourceRef[]};
+  content_attributes:{main_format:string;attributes:string[]}; rules:ApplicableRules;
+};
+type BoundaryRoute = {
+  action:"continue"|"stop"; reason_code:string;
+  eligible_claim_ids:string[]; limits_by_claim:Record<string,string[]>;
+};
+type Highlight = {
+  highlight_id: string; claim_ids: string[]; value: string;
+  representativeness: string; delivery_evidence_refs: string[];
+};
+type HighlightSet = {highlights:Highlight[]; primary_highlight_id:string|null};
+type HighlightInput = {
+  eligible_claim_ids:string[]; limits_by_claim:Record<string,string[]>;
+  content_context:{packet:VideoPacket;understanding:Understanding}; rules:ApplicableRules;
+};
+// 限定由流程代码通过 claim_ids 合并，不能只让模型“记得保留”。
+// 但标题是否语义上保留了限定，仍需模型复核与独立评审。
+// 展示用自然语言限定后续可升级为结构化类型：time / attribution / scope / certainty。
+// limited = usable_with_limits；本页统一用 limited，禁止两种枚举混用。`],
+['生成与候选交付',`type GenerationPrepareInput = {highlights:HighlightSet; boundary:BoundarySet;
+  applicable:ApplicableRules; config:RunConfig};
+type GenerationContext = {
+  run_id:string; reference_time:string;
+  content_profile:{domains:string[];main_format:string;attributes:string[]};
+  rules:Rule[]; evidence_items:Evidence[];
+  allowed_claims:ClaimDecision[]; highlights:Highlight[];
+  primary_highlight_id:string|null; rule_version:string;
+  constraints:{max_chars:number; char_count:string; forbidden_symbols:string[];
+    limits_by_highlight:Record<string,string[]>};
+  memory_policy:{enabled:boolean;max_calls:number}; target_count:number;
+};
+type Candidate = {
+  candidate_id:string; headline:string; highlight_id:string; claim_ids:string[];
+  expression_strategy:string; used_case_ids:string[]; generation_round:number;
+};
+type MemoryQuery = {query?:string; domains?:string[]; format?:string;
+  problem_types:string[]; rule_version:string; limit:number};
+type MemoryCase = {case_id:string; approved:boolean; compatible_rule_versions:string[];
+  problem_type:string; bad_example:string; good_example:string; applicability:string};
+type MemoryResult = {status:"ok"|"empty"|"error"; retrieval_id:string;
+  cases:MemoryCase[]; error_code?:string};
+type MemoryTrace = {decision?:string; query?:MemoryQuery; status?:string;
+  used_case_ids:string[]; reason?:string; fallback?:string};
+type AgentDraft = {candidates:Candidate[]; memory_trace:MemoryTrace[];
+  shortfall_reason:string|null};
+type CandidateFailure = {candidate_id:string; reasons:string[]; char_count:number};
+type CandidateCheck = {
+  accepted:(Candidate & {char_count:number;status:"pending_review"})[];
+  rejected:CandidateFailure[]; checks_version:string;
+};
+type CandidateRoute = {action:"handoff"|"stop";candidate_ids:string[];
+  shortfall:number;reason_code:string};
+type CandidateBatch = {
+  run_id:string;video_id:string;status:"pending_review";candidates:Candidate[];
+  review_context:{evidence_items:Evidence[];boundary:BoundarySet;rule_version:string};
+  audit:{node_ids:string[];memory_calls:number;schema_retries:number};
+};`],
+['公共包装器与运行状态',`type ModelRequest = {node_id:string;prompt:string;payload:object;attempt:number};
+type ModelReply =
+  | {status:"ok";raw_text:string}
+  | {status:"error";error:string;retryable:boolean};
+type CheckResult<T> =
+  | {status:"ok";value:T;errors:[];retryable:false}
+  | {status:"invalid";value:null;errors:Issue[];retryable:boolean};
+type CallRoute<T> =
+  | {action:"advance";payload:T;reason_code:"STRUCTURE_VALID"}
+  | {action:"retry_same_node";next_attempt:number;errors:Issue[];reason_code:string}
+  | {action:"stop";errors:Issue[];reason_code:"NODE_FAILED"};
+type Checked<T> = T; // 仅通过 checked_call 后返回；失败显式终止，不返回假成功对象
+type RunState = {
+  run:RunInput; packet?:VideoPacket; base_rules?:RuleBundle;
+  understanding?:Understanding; applicable?:ApplicableRules;
+  boundary?:BoundarySet; highlights?:HighlightSet; generation?:GenerationContext;
+  draft?:AgentDraft; checks?:CandidateCheck; result?:CandidateBatch;
+  attempts_by_node:Record<string,number>; memory_calls:number;
+  status:"running"|"pending_review"|"stopped";
+};
+type Stop = {status:"stopped";node_id:string;reason_code:string;errors:Issue[];manual_queue?:string};
+// 原始 ModelReply 进入日志；只有 CheckResult.status=ok 的 value 写入业务状态。
+// C03 的结构重试按节点计数；Memory 预算按本次任务共享。
+// 日志只记录可追溯输入/输出引用和简短理由，不要求保存模型隐式推理。`]
+];
+const orchestration=`# 设计伪代码；展示控制关系，不是已完成的后端实现。
+# 主流程为简洁省略 checked_call 的命名参数：
+# allowed_refs 来自当前证据/事实/规则 ID；state 为任务状态；config 为 RunConfig。
+# 原始输入/输出的日志引用由 append_event 包装器生成。
+def generate_titles(request, config):
+    run = accept_task(request, config)                              # N00
+    input_check = validate_input(run)                              # N01
+    if input_check.status != "ok": return stop("INVALID_INPUT")
+    packet = input_check.packet
+    base = read_rules(config.rule_version, scope="base")           # N02 / T01
+    understanding = checked_call("N03", {packet, base}, Understanding)
+    rules = match_rules(packet, understanding, base)               # N04 / T01
+    if rules.unresolved_conflicts: return stop("RULE_CONFLICT")
+    boundary = checked_call("N05", {packet, understanding, rules,
+                            config.reference_time}, BoundarySet)
+    boundary_route = route_boundary(boundary)                      # N06
+    if boundary_route.action == "stop": return stop(boundary_route.reason_code)
+    highlights = checked_call("N07", {boundary_route, packet,
+                              understanding, rules}, HighlightSet)
+    context = prepare_generation(highlights, boundary, rules, config) # N08
+    if context is Stop: return context
+    draft = checked_agent("N09", context, tools={search_memory},
+                          schema=AgentDraft, shared_budget=run.budget)
+    checks = check_candidates(draft, context)                      # N10
+    route = route_candidates(checks)                              # N11
+    if route.action == "stop": return stop(route.reason_code)
+    return build_candidate_batch(route, checks, packet, boundary)  # N12
+
+def checked_call(node, payload, schema, *, allowed_refs, state, config):
+    previous_errors = []
+    schema_retry_limit = config.schema_retry_limit
+    for attempt in range(schema_retry_limit + 1):
+        append_event(node, "started", input_ref=payload_ref)       # T03
+        reply = call_model(node, payload, previous_errors)         # C01
+        check = validate_reply(reply, schema, allowed_refs)        # C02
+        route = route_check(check, attempt, schema_retry_limit)    # C03
+        append_event(node, route.action, output_ref=check_ref)     # T03
+        if route.action == "advance":
+            commit_validated_state(state, node, route.payload)
+            return route.payload
+        if route.action == "stop": raise NodeStopped(route.errors)
+        previous_errors = check.errors
+    # NodeStopped 在顶层转成 Stop；不吞掉错误后继续。
+    # 结构修复重新接收原始输入，不能只收到一段错误信息。
+    # Agent 调用同样包装最终结果，工具每次调用还要独立校验参数和返回。`;
+
+function contractsView(){return `<h2 class="section-title">数据有生产者，也有唯一的消费约定。</h2><p class="lede">以下为 V0.2 类型契约。字段缺失与 unknown 需要明确表达；不会因为模型返回了一段文本就自动把它写入业务状态。构造样例为了阅读省略了部分规则元数据，正式实现必须按完整 Schema 校验。</p><div class="schema-index">${contracts.map(([title],i)=>`<button data-contract="${i}" class="${i===contractIndex?'active':''}">${title}</button>`).join('')}</div>${code(contracts[contractIndex][1])}<h3>工具不是另一个“业务阶段”</h3>${table(['工具','调用参数','返回对象','谁发起','读写对象'],DOC.tools.map(t=>[t[0]+' '+t[1],t[2],t[3],t[4],t[5]]))}<h3>工具调用本身也有输入与输出</h3>${table(['步骤','输入','输出','失败动作'],[['参数校验','Agent 的 MemoryQuery + 预算 + 允许参数','ValidatedToolArgs 或错误','拒绝非法参数，不调用工具'],['工具执行','ValidatedToolArgs','MemoryResult 或 ToolError','检索超时/空结果可降级'],['返回校验','MemoryResult + 案例格式约定','ValidatedMemoryResult','格式错误视为工具失败，不塞给 Agent 当有效案例'],['适用性筛选','已校验案例 + 当前规则/视频特征','采用的 case_ids + 放弃理由','规则冲突或内容不适用就丢弃'],['回到生成','适用案例 + 原 GenerationContext','AgentDraft','案例不扩大事实范围，预算不重置']])}<h3>完整调用顺序</h3>${code(orchestration)}<h3>X01：所有停止路径必须有明确结果</h3>${table(['错误类别','返回对象中的 reason_code','后续'],[['输入/配置','INVALID_INPUT / RULES_UNAVAILABLE / RULE_CONFLICT','保留错误与输入快照；不调用生成'],['调用失败','NODE_FAILED','记录节点、次数与最后错误；按业务规则转异常'],['内容不足','NO_USABLE_CLAIM / NO_HIGHLIGHT','终止自动生成；是否人工补充材料待定义'],['无候选','NO_VALID_CANDIDATE','保留被剔除候选及原因；不视为模型调用失败'],['工具降级','MEMORY_UNAVAILABLE（非阻断事件）','正式规则完整时继续；在日志记录']] )}`}
+
+function rulesView(){return `<h2 class="section-title">把复杂判断收进规则，不变成十几项平行打分。</h2><p class="lede">生成模型要处理三个核心决定。细分维度保留为触发条件、边界和案例；评审端再检查结果是否兑现。</p>${table(['层次','可执行要求','归属节点'],[['基础约束','不改变原意、保留关键条件、语义完整；程序处理长度和符号','贯穿 N03–N10'],['可写边界','确认信息的时间范围、身份归属、证据和确定程度','N05'],['核心看点','依据视频主线和实际交付选主看点，避免用边角噱头替代','N07 / N09'],['策略与分寸','满足触发条件才执行反差、悬念、结果前置等写作动作','N09'],['评审标准','独立核对事实/预期/代表性，再评价吸引力与表达','本稿范围外；不能由生成自评分放行']])}<h3>时效：三个时间＋一个使用基准</h3>${table(['信息','来源','对文案的影响'],[['发布时间 published_at','上游元数据；没有则 null','不能直接替代事件发生时间'],['事件时间 event_time','内容提取＋证据引用；提取不到 unknown','决定是否能说明何时发生'],['信息有效期 validity','正式业务规则＋状态更新证据','旧状态不能无依据地改写成当前状态'],['使用时间 reference_time','任务运行配置，含时区','所有“今天/近期/目前”的判断参照点']])}<div class="notice">信息有效期不是模型猜一个到期日。动态状态无当前证据时，限定在有依据的历史范围；如果看点依赖“现在仍成立”，则不采用。交付延迟是否触发重新判断仍待确认。</div><h3>信源：身份、来源、证据逐层区分</h3>${table(['层次','判断内容','不能直接推出'],[['发布者身份','平台是否已核验、资质与领域是否相关','所有内容都可信，或资质足以证明具体结论'],['原始来源','亲历、自述、机构发布、转载、来源不明','转发者身份等同于原始信源'],['具体依据','画面、文字、文件、引述究竟支持哪条陈述','场面支持原因、推测变为结果、局部变为整体']])}<div class="notice warn">“网传 / 疑似 / 据说”不能为无依据核心说法提供通用放行。注明归属只能解决一部分表达准确性问题，仍须满足正式准入规则。</div><h3>将评价词改成生成动作</h3>${table(['触发条件','选择的信息','表达动作','保留边界'],[['视频确有前后变化','有证据的原状态与新状态','组织成前后对照','不能放大变化幅度或删掉比较条件'],['视频提出并回答明确问题','问题对象与可兑现答案','可以先交代问题，保留答案','不虚构问题前提，不承诺不存在的答案'],['看点来自景物/才艺体验','最突出的对象、动作、场景变化','用具体信息替代“太精彩”等泛词','不强行编知识收益或冲突'],['作者表达观点或预测','作者实际主张及适用范围','保留分析/预测归属','不改为确定事实或已发生结果']])}<h3>尚未确认的地方，不藏在代码默认值里</h3>${table(['状态','事项','处理'],DOC.assumptions)}<h3>最小验收用例</h3>${table(['用例','预期结果'],[['发布时间新，但事件为旧','不能包装成刚发生；引用事件时间'],['旧视频里的无时效技巧','不因视频旧就直接排除'],['原标题含当前状态，正文仅旧事件','排除当前状态；允许有依据的历史表达'],['作者身份 unknown，但内容是个人分析','不猜资质；保留观点归属并按规则判断'],['字段齐全，但核心材料矛盾','不因齐全就判为可用'],['evidence_id 不存在','C02 校验失败，C03 有界重试'],['全部 excluded，但结构合法','C02 通过，N06 停止'],['结构合法的语义幻觉','程序不能凭结构识别；依赖独立语义评审与人工'],['Memory 超时','规则完整时降级；记录失败与预算'],['关键限定放不进 20 字符','换看点或放弃候选，不删除改变含义的限定']])}`}
+
+function render(){
+  $('#tabs').innerHTML=tabs.map(([id,title])=>`<button type="button" data-tab="${id}" class="${id===currentTab?'active':''}" aria-pressed="${id===currentTab}">${title}</button>`).join('');
+  const views={overview,nodes:nodeDetail,validation:validationView,trace:traceView,contracts:contractsView,rules:rulesView};$('#content').innerHTML=views[currentTab]();
+  bind();
+}
+function go(tab){currentTab=tab;render()}
+function bind(){
+  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>go(b.dataset.tab));
+  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{selectedNode=DOC.nodes.findIndex(n=>n.id===b.dataset.open);go('nodes')});
+  document.querySelectorAll('[data-node]').forEach(b=>b.onclick=()=>{selectedNode=DOC.nodes.findIndex(n=>n.id===b.dataset.node);render()});
+  document.querySelectorAll('[data-trace]').forEach(b=>b.onclick=()=>{traceIndex=Number(b.dataset.trace);render()});
+  document.querySelectorAll('[data-contract]').forEach(b=>b.onclick=()=>{contractIndex=Number(b.dataset.contract);render()});
+  if($('#nodeSelect'))$('#nodeSelect').onchange=e=>{selectedNode=Number(e.target.value);render()};
+  if($('#prevNode'))$('#prevNode').onclick=()=>{selectedNode--;render()};if($('#nextNode'))$('#nextNode').onclick=()=>{selectedNode++;render()};
+  if($('#nodeTrace'))$('#nodeTrace').onclick=()=>{scenario='normal';traceIndex=runDemo(scenario).findIndex(t=>t.id===DOC.nodes[selectedNode].id);go('trace')};
+  if($('#validationMode'))$('#validationMode').onchange=e=>{validationMode=e.target.value;render()};
+  if($('#scenario'))$('#scenario').onchange=e=>{scenario=e.target.value;traceIndex=0;render()};
+  if($('#tracePrev'))$('#tracePrev').onclick=()=>{traceIndex--;render()};if($('#traceNext'))$('#traceNext').onclick=()=>{traceIndex++;render()};
+}
+render();
+
+</script>
+</body></html>

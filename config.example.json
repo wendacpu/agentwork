@@ -1,0 +1,14 @@
+{
+  "asset_root": "/Users/wanting/program/新项目/复杂agent/recent-portrait-100",
+  "output_dir": "runtime",
+  "model_provider": "mock",
+  "generation_model": "mock",
+  "review_model": "mock",
+  "prompt_pack_version": "red-dot-v0.2-modular",
+  "ocr_mode": "filtered",
+  "target_count": 3,
+  "max_chars": 20,
+  "max_rewrite_rounds": 2,
+  "schema_retry_limit": 1,
+  "memory_call_limit": 6
+}

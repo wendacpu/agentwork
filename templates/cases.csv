@@ -1,0 +1,20 @@
+﻿TC_ID,决策点,测试目标,输入（video_id + 条件）,期望输出 / 验收标准,当前结果,状态
+TC01,D02,资讯类必须保留来源归属,"BV1Ltsf6xEpV 肺结核筛查通报；标题不含""据…通报/称""",G1 判 revise，issue=G1_SOURCE_ATTRIBUTION_MISSING,❓待跑,待验
+TC02,D02,旧事件不得写成当前进展,BV11Ssf6gEUV 挪威首相驳斥英媒报道；事件发生在过去,"标题不得出现""今日/刚刚/正在""类表述",❓待跑,待验
+TC03,D02,现场记录不得写赛果,BV1ifjG6uEwE 足球转播片段，无赛果信息,标题不得写比分、胜负、晋级,❓待跑,待验
+TC04,D01,不得编造数字,BV1VfKy6AEid 费兰补时破门,标题中出现的比分/时间必须能在 evidence 中找到,❓待跑,待验
+TC05,D03,局部演示不得包装成完整教程,BV1KSbJ6kE2s 初级流瑜伽串联，只演示部分体式,G3 判 revise，issue=G3_NOT_DELIVERED,❓待跑,待验
+TC06,D05,"不得写""看完必会""",BV17QpS6cEje 白菜做法,"标题不得含""必会/零失败/人人能成""",❓待跑,待验
+TC07,D03,单次测评不得写成横评,BV1oFxE6LELz 跑鞋测评，无对照,"标题不得写""横评/对比/最""除非材料有对照",❓待跑,待验
+TC08,D02,剧情必须显式标注,BV1FNgz6zELK 生活常识剧情短片,"标题含""剧情/短剧/演绎""或选择不会误读的角度",❓待跑,待验
+TC09,D02,观点不得写成已证实事实,BV13ZHT6AEYW 板块漂移讲解,若为作者判断，标题须保留归属或改成可观察描述,❓待跑,待验
+TC10,D05,长度硬约束,任意视频，生成后检查,所有候选 ≤20 字符；超限必须被 G4 拦下,❓待跑,待验
+TC11,D06,问号结尾必须被程序拦截,"构造一条以""？""结尾的候选",G4 fail，issue=G4_ENDING_QUESTION_MARK，不进 R01,✅ 已由单测覆盖,已验
+TC12,D09,无可用陈述时必须业务停止,人为把 boundary 全部置 excluded,任务 status=stopped，stop_reason=NO_USABLE_CLAIM，不得生成候选,✅ 代码路径存在,已验
+TC13,D08/D11,不合格必须能归因到具体节点,任取一条被判不可用的候选,issues[].primary_dimension + claim_ids 能指到 N05 或 N09,❓待跑,待验
+TC14,D10,人工驳回后剩余候选仍可审,一条候选被驳回、还有其它候选,任务保持 pending_human，route 的 eligible 更新为剩余候选,✅ 单测覆盖,已验
+TC15,D02,暂缓核验必须停止而不是编造,任一视频，把 boundary 全部置 excluded 且 verification_required=true,任务 status=stopped，stop_reason=PENDING_VERIFICATION，state 里有 verification_tasks,✅ test_pending_verification_routes_to_stop_with_tasks,已验
+TC16,D03,看点不可兑现时必须弃权,任一视频，highlight 返回 abandon=true,任务 status=stopped，stop_reason=NO_VIABLE_HIGHLIGHT，不生成候选,✅ test_highlight_abandon_stops_instead_of_faking,已验
+TC17,D08→D03,G3 类问题必须换看点重写，不能只改表达,构造 G3_CORE_POINT_OMITTED,重写入参 rewrite_mode=看点、allow_highlight_change=true,✅ test_g3_issue_switches_rewrite_to_highlight_mode,已验
+TC18,D05,策略与材料不符要被识别,无步骤的材料 + 策略「问题方法」,机械校验记 Q2_STRATEGY_MISMATCH warning，评审可据此记 issue,✅ 机械校验已实现，评审待校准,部分验
+TC19,D02,禁止推断必须传到生成节点,任一视频,N09 的 prompt_snapshot.user_payload.source_requirements 含 forbidden_inferences,✅ test_forbidden_inferences_reach_generation,已验

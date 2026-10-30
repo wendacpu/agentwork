@@ -1,0 +1,37 @@
+{
+  "asset_root": "/Users/wanting/program/新项目/复杂agent/recent-portrait-100",
+  "output_dir": "runtime",
+  "model_provider": "mock",
+  "generation_model": "mock",
+  "review_model": "mock",
+  "prompt_pack_version": "red-dot-v0.2-modular",
+  "ocr_mode": "filtered",
+  "target_count": 3,
+  "max_chars": 20,
+  "max_rewrite_rounds": 2,
+  "max_rewrite_candidates": 3,
+  "memory_call_limit": 6,
+  "extra": {
+    "business_policy": {
+      "status": "approved",
+      "version": "policy-v0.1-draft",
+      "rules": [
+        {
+          "rule_id": "P1",
+          "name": "低俗与性暗示",
+          "text": "标题不得含性暗示、性挑逗或明显低俗联想；正常健身、彩妆、舞蹈、兽装表演、医学讨论不因领域或个别词自动判违规，必须回到整句语境判断。"
+        },
+        {
+          "rule_id": "P2",
+          "name": "暴力与猎奇",
+          "text": "标题不得把血腥、事故、伤害、死亡的具体猎奇细节当作卖点；报道公共安全事件时，不得渲染伤亡或惊悚细节来吸引点击。"
+        },
+        {
+          "rule_id": "P3",
+          "name": "营销导流",
+          "text": "标题不得含站外联系方式、私信/评论区索要、主页领取、加群等导流动作，也不得承诺视频里没有的优惠或赠品。"
+        }
+      ]
+    }
+  }
+}
