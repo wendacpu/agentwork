@@ -14,6 +14,7 @@ from .storage import Storage
 from .types import CaseRecord, HumanDecision
 from .memory import MemoryStore
 from .debugger import serve as serve_debugger
+from .goldsheet import record as record_gold
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,8 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("batch"); b.add_argument("video_ids", nargs="*"); b.add_argument("--limit", type=int, default=0)
     rr = sub.add_parser("report"); rr.add_argument("task_id"); rr.add_argument("--output", default="runtime/report.html")
     rv = sub.add_parser("rereview"); rv.add_argument("task_id")
-    h = sub.add_parser("human"); h.add_argument("task_id"); h.add_argument("candidate_id"); h.add_argument("decision", choices=["approved", "rejected"]); h.add_argument("--headline"); h.add_argument("--reason", default=""); h.add_argument("--reviewer")
+    h = sub.add_parser("human"); h.add_argument("task_id"); h.add_argument("candidate_id"); h.add_argument("decision", choices=["approved", "marginal", "rejected"]); h.add_argument("--headline"); h.add_argument("--reason", default=""); h.add_argument("--criteria", default="", help="命中的判据 ID，如 C14"); h.add_argument("--reason-type", default="", help="如 expression:wording_unclear / upstream / manual_rewrite"); h.add_argument("--rewrite-suggestion", default=""); h.add_argument("--reviewer")
     c = sub.add_parser("case"); c.add_argument("task_id"); c.add_argument("case_id"); c.add_argument("case_type", choices=["rule", "fact", "expression"]); c.add_argument("problem_type"); c.add_argument("bad_example"); c.add_argument("good_example"); c.add_argument("applicability"); c.add_argument("--confirm", action="store_true"); c.add_argument("--scope", default=""); c.add_argument("--source-evidence", nargs="*", default=[]); c.add_argument("--case-version", default="v1")
+    cl = sub.add_parser("case-list"); cl.add_argument("--all", action="store_true", help="含未确认草稿")
+    cs = sub.add_parser("case-show"); cs.add_argument("case_id")
     cc = sub.add_parser("case-confirm"); cc.add_argument("case_id")
     cf = sub.add_parser("case-from"); cf.add_argument("task_id")
     ex = sub.add_parser("export-labels"); ex.add_argument("--output", default="runtime/labels.json")
@@ -92,11 +95,51 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "report": print(render_task(storage, args.task_id, args.output)); return 0
     if args.cmd == "rereview": print(pipeline.rereview(args.task_id)); return 0
     if args.cmd == "human":
-        decision = HumanDecision(args.candidate_id, args.decision, args.headline, args.reason, args.reviewer)
-        storage.record_human_decision(args.task_id, asdict(decision))
-        print(args.task_id); return 0
+        payload = {
+            "candidate_id": args.candidate_id, "decision": args.decision,
+            "final_headline": args.headline, "reason": args.reason, "reviewer": args.reviewer,
+            "criteria_id": args.criteria, "reason_type": args.reason_type,
+            "rewrite_suggestion": args.rewrite_suggestion or None,
+        }
+        storage.record_human_decision(args.task_id, payload)
+        # 判定必须同时进 gold.csv，否则 eval 读不到（CLI 与调试台走同一条口径）
+        row = storage.get_task(args.task_id)
+        state = json.loads(row["state_json"] or "{}")
+        candidate = next((c for c in (state.get("candidates") or []) if c.get("candidate_id") == args.candidate_id), {})
+        route = state.get("route") or {}
+        path = record_gold(
+            video_id=row["video_id"], task_id=args.task_id, candidate_id=args.candidate_id,
+            headline=str(candidate.get("headline") or ""),
+            verdict={"approved": "可用", "marginal": "勉强通过"}.get(args.decision, "不可用"),
+            final_headline=args.headline, criteria_id=args.criteria, fallback_node="",
+            reason=args.reason, reviewer=args.reviewer or "unnamed", route=str(route.get("action") or ""),
+            recommended="是" if route.get("recommended_candidate_id") == args.candidate_id else "",
+        )
+        print(json.dumps({"task_id": args.task_id, "gold": str(path)}, ensure_ascii=False)); return 0
     if args.cmd == "case":
         case = CaseRecord(args.case_id, args.case_type, args.problem_type, args.bad_example, args.good_example, args.applicability, args.task_id, config.rule_version, args.confirm, [config.rule_version], "confirmed" if args.confirm else "draft", args.scope, args.source_evidence, args.case_version); MemoryStore(storage.conn).create_draft(case); print(args.case_id); return 0
+    if args.cmd == "case-list":
+        rows = [dict(r) | {"payload": json.loads(r["payload"])} for r in storage.conn.execute("SELECT case_id, payload, confirmed, rule_version FROM cases ORDER BY confirmed DESC, case_id")]
+        if not args.all:
+            rows = [r for r in rows if r["confirmed"]]
+        if not rows:
+            print("案例库是空的：先判一条（调试台或 `human` 命令），采纳/驳回会自动沉淀。")
+            return 0
+        print(f"{'状态':6s} {'极性':8s} {'问题类型':28s} {'标题':38s} 已采纳标题")
+        print("-" * 120)
+        for r in rows:
+            d = r["payload"]
+            bad = str(d.get("bad_example") or "")[:34]
+            good = str(d.get("good_example") or "")[:34]
+            state = "已确认" if r["confirmed"] else "草稿"
+            print(f"{state:6s} {str(d.get('polarity') or '-'):8s} {str(d.get('problem_type') or '')[:26]:28s} {bad:38s} {good}")
+        print(f"\n共 {len(rows)} 条（{storage.path}）")
+        return 0
+    if args.cmd == "case-show":
+        row = storage.conn.execute("SELECT * FROM cases WHERE case_id=?", (args.case_id,)).fetchone()
+        if not row:
+            print(f"没有这条案例：{args.case_id}"); return 1
+        print(json.dumps(json.loads(row["payload"]), ensure_ascii=False, indent=2)); return 0
     if args.cmd == "case-confirm":
         ok = MemoryStore(storage.conn).confirm(args.case_id)
         print(json.dumps({"case_id": args.case_id, "confirmed": ok}, ensure_ascii=False)); return 0 if ok else 2

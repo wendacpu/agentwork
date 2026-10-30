@@ -22,7 +22,8 @@ usable 表示可忠实表达；limited 表示必须保留 required_limits；excl
 分别输出互不替代的 claim_type（observable/source_claim/opinion/prediction/inference/fictional_setting）、evidence_status（supported/limited/conflicting/unknown/unsupported）、original_source（身份与类型）、transmission_path（从原始信源到视频的传播链）、temporal_status（current/historical/dynamic/unknown）和 assertion_permission（direct/attributed/qualified/forbidden/unknown）。
 输出实体角色 entities、decision、required_limits、forbidden_inferences、rule_ids、attribution_required、required_source_phrase 与 verification_required。
 判断顺序：有依据且无需关键限定 → usable；依赖时间、归属或条件 → limited 并写 required_limits；核心事实存在未解冲突 → decision 置 excluded 且 verification_required=true；无依据新增或明确错误 → excluded。
-verification_required=true 表示「暂缓核验」：该陈述不进入可写集合，但要作为核验任务保留，不能当成普通 excluded 丢弃。evidence_refs、source_evidence_refs 只能使用输入 evidence[].evidence_id 中存在的 ID。只有不标来源会使用户误以为系统或作者直接确认、或法律/业务规则要求归因时，才把 attribution_required 设为 true；“来源可识别”本身不等于标题必须写出来源名称。证据支持不等于来源已核验，来源身份也不代表证据强度。输出 BoundarySet。"""
+verification_required=true 表示「暂缓核验」：该陈述不进入可写集合，但要作为核验任务保留，不能当成普通 excluded 丢弃。evidence_refs、source_evidence_refs 只能使用输入 evidence[].evidence_id 中存在的 ID。只有不标来源会使用户误以为系统或作者直接确认、或法律/业务规则要求归因时，才把 attribution_required 设为 true；“来源可识别”本身不等于标题必须写出来源名称。证据支持不等于来源已核验，来源身份也不代表证据强度。
+核实与归属要求按 U-S08 分形态分级，不逐条自由判：资讯播报、知识科普/健康运动类讲解为强制；测评走访及 opinion/prediction 为条件；剧情、表演、成果展示、现场记录为豁免。豁免类不要标 attribution_required=true——那会占用字数并让标题显得无足轻重。输出 BoundarySet。"""
 
 HIGHLIGHT_PROMPT = """任务：从通过 boundary 的陈述中选择可兑现的观看价值，不写标题。
 选 1 个主看点和最多 2 个备选；写清用户能看到什么、代表性、claim_ids、evidence_ids 与必要限定。区分局部演示和完整教程、观点和事实、片段和完整过程。不得添加新事实。
@@ -33,7 +34,7 @@ HIGHLIGHT_PROMPT = """任务：从通过 boundary 的陈述中选择可兑现的
 
 GENERATION_PROMPT = """角色：标题创作者。任务：在事实边界内理解看点、选择表达角度，生成指定数量的差异化标题候选。
 先满足 hard 约束，再满足已触发的 conditional 要求；在剩余空间内优化清晰度、信息价值和吸引力。信息锚点、完整主谓宾、具体名称及来源短语不是通用必填字段；只在理解看点或准确归属所必需时使用。
-对资讯、教程、观点、故事、表演、展示等采用与交付方式相符的标题结构。标题必须让用户能识别主要内容和观看承诺，但不强制包含结果/状态。遵守 display_config 的字数和格式要求；只用允许的 claims/highlights，保留被明确要求的限定，不得把历史案例事实迁移到当前视频。
+对资讯、教程、观点、故事、表演、展示等采用与交付方式相符的标题结构。标题必须让用户能识别主要内容和观看承诺，但不强制包含结果/状态。遵守 display_config 的字数和格式要求；**长度是硬约束，来源归属前缀同样计入字数，不因"必须带归属"而放宽上限**。优先级固定为：长度 > 归属完整度 > 修辞。冲突时压缩归属表达（"据通报"而非"据某县某调查组通报"），压不进去就换更短的看点；不得省略限定或删除事实换取长度。只用允许的 claims/highlights，保留被明确要求的限定，不得把历史案例事实迁移到当前视频。
 memory_cases 里 polarity=negative 的条目是反例（good_example 为空），表示"这类表达被判过勉强通过或驳回"，用来避开同类写法；不要从反例里抄事实或句式。
 表达策略只能从固定枚举里选一个：问题方法（视频给出方法/步骤）、对照比较（有同条件对比）、前后变化（有前后两个状态）、疑问留答（视频确实给答案）、直接描述（以上都不满足的兜底）。条件不成立就不能用对应策略；不确定时用「直接描述」。不要自造策略名。
 必须严格使用这些键名，不要自造同义字段：headline（标题正文，不是 candidate_title）、candidate_id、highlight_id、claim_ids、evidence_ids、strategy、qualifiers_used（数组）、used_case_ids、generation_round。返回 {"candidates": [...]}。
@@ -41,6 +42,7 @@ qualifiers_used 填「required_limits 在你的标题里实际是怎么表达的
 
 REWRITE_PROMPT = """角色：定向修订者。根据 parent_candidate、结构化 issues 和 rewrite_guidance 修复问题。
 只改指出的缺陷，保留正确且有证据的表达；必须重新满足当前 boundary、规则和展示约束，不得降低证据标准或迁移 Memory 中的事实。
+长度是硬约束：不得通过放宽字数、省略归属或删除限定来获取通过；归属与长度冲突时按生成节点同一优先级压缩（长度 > 归属完整度 > 修辞）。
 若输入 allow_highlight_change 为 true（问题出在看点本身，例如承诺未被交付、主看点缺失），你可以在 highlights 里改用备选看点，并把 highlight_id 改成新看点的 ID；否则必须沿用原 highlight_id。
 必须逐条处理 review_issues 里的每个 issue_id，并在 addressed_issue_ids 里回报你实际修掉了哪些（用输入里的 issue_id 原文，不要自造）。没有修的不要写进去。修改说明写进 change_reason，要能对应到具体 issue。
 返回 1–2 个修订候选，包含 parent_candidate_id、generation_round、change_reason、claim_ids、evidence_ids、strategy、qualifiers_used、addressed_issue_ids、used_case_ids。无法忠实修复时返回空 candidates 并说明 shortfall_reason。不要自行判定通过。"""
@@ -51,7 +53,7 @@ G1 事实与断言许可：只判断事实是否有支持、实体角色/归属�
 来源权威性属于 G1：把个人号、非权威媒体或来源不明的说法，写成用户会当作官方或权威信息的陈述时，记 G1_SOURCE_UNVERIFIED。账号认证过不等于来源权威；来源名字写了也不等于权威性够。判断依据是「用户看到这条会不会高估它的可信度」，不是「作者粉丝多不多」。
 G2 已批准业务政策：只按输入中的已批准政策判断；政策缺失或冲突时 needs_review，不得臆造禁令。
 G3 内容交付与承诺：只判断标题是否描述主看点、是否承诺了视频没有交付的内容；不要因标题短或未列出全部事实而判不完整。
-Q1 清晰度：判断指代、关系和句意是否能独立理解；不要求特定语法句式，也不评价具体信息多寡。
+Q1 清晰度：判断指代、关系和句意是否能独立理解；不要求特定语法句式，也不评价具体信息多寡。缩写或行业黑话（FT、TV2、RT、ASR 等）未展开、读者需要额外行业知识才能读懂时，记 Q1_UNCLEAR——要求换成全称而不是加解释。
 Q2 信息价值：判断内容是否具体、可辨识且相关；不重复评事实支持或主看点覆盖。
 Q3 吸引力：只评价在事实和交付均合格前提下的表达动机与感染力；不以夸张、争议或未支持承诺加分。
 质量评分只用 1/2/3：1 明显不足，2 达到基本要求，3 表现优秀；每个分数都要给简短 reason。Gate 问题不能被质量分抵消。每个问题只给一个与 issue_code 前缀一致的 primary_dimension，避免重复登记同一根因；分别给 issue_id、severity、repairable、problem_span、evidence_ids、rule_ids、reason、action、rollback_to。

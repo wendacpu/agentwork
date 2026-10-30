@@ -1,6 +1,6 @@
 {
   "asset_root": "/Users/wanting/program/新项目/复杂agent/recent-portrait-100",
-  "output_dir": "runtime",
+  "output_dir": "runtime/real_run_flash_nothink",
   "model_provider": "deepseek",
   "generation_model": "deepseek-flash",
   "review_model": "deepseek-flash",
