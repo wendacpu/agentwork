@@ -230,6 +230,21 @@ class WiringTests(unittest.TestCase):
         used = [cid for t in (state.get("memory_trace") or []) for cid in (t.get("used_case_ids") or [])]
         self.assertIn("c-rv", used, f"案例没有被检索到，memory_trace={state.get('memory_trace')}")
 
+    def test_marginal_without_edit_becomes_negative_case(self):
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        cand = state["candidates"][0]
+        self.storage.record_human_decision(task_id, {
+            "candidate_id": cand["candidate_id"], "decision": "marginal",
+            "reason": "FT 是缩写，多数用户不认识", "reason_type": "expression:wording_unclear",
+        })
+        rows = [json.loads(r[0]) for r in self.storage.conn.execute("SELECT payload FROM cases")]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["polarity"], "negative")
+        self.assertEqual(rows[0]["good_example"], "")
+        self.assertEqual(rows[0]["bad_example"], cand["headline"])
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(

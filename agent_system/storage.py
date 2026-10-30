@@ -166,12 +166,21 @@ class Storage:
         original = str(candidate.get("headline") or "")
         final = str(decision.get("final_headline") or "")
         suggestion = str(decision.get("rewrite_suggestion") or "")
-        if decision.get("decision") in {"approved", "marginal"}:
-            if not final or final == original:
+        status = str(decision.get("decision") or "")
+        polarity = "positive"
+        if status in {"approved", "marginal"}:
+            if final and final != original:
+                good, confirmed, case_type = final, True, "expression"
+            elif status == "marginal":
+                # 能用但有问题、且没改标题：沉淀成反例，让下次生成知道"这类表达勉强通过"
+                good, confirmed, case_type, polarity = "", True, "expression", "negative"
+            else:
                 return None
-            good, confirmed, case_type = final, True, "expression"
         elif suggestion:
             good, confirmed, case_type = suggestion, False, "expression"
+        elif status == "rejected":
+            # 驳回且没给改写建议：至少留下"这么写不行"的反例
+            good, confirmed, case_type, polarity = "", True, "expression", "negative"
         else:
             return None
         rule_version = str((state.get("rules") or {}).get("version") or "temporary-v1")
@@ -190,6 +199,7 @@ class Storage:
         )
         payload = asdict(case)
         payload["trigger_issue_codes"] = [str(i.get("issue_code")) for i in issues if i.get("issue_code")]
+        payload["polarity"] = polarity
         payload["confirmed"] = confirmed
         payload["case_status"] = "confirmed" if confirmed else "draft"
         self.conn.execute("INSERT OR REPLACE INTO cases(case_id,payload,confirmed,rule_version) VALUES(?,?,?,?)", (case.case_id, json.dumps(payload, ensure_ascii=False), int(confirmed), rule_version))
