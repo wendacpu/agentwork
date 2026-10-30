@@ -811,7 +811,9 @@ class Pipeline:
             problem_types = [str(x) for x in memory_query.get("problem_types", [])] if source else ["表达", "事实与信源"]
             query = query.strip() or video.title
             scope = [str(x) for x in (video.domain or {}).values()] + [str(video.format)]
-            cases = self.memory.search(query, problem_types, self.config.rule_version, limit=3, scope=scope)
+            # 案例按「规则包版本」入库，检索也必须用同一个版本号；
+            # 用 config.rule_version（临时规则版本 temporary-v1）查会永远 0 命中。
+            cases = self.memory.search(query, problem_types, self.config.prompt_pack_version, limit=3, scope=scope)
             state["memory_calls"] = memory_calls + 1
             state.setdefault("memory_trace", []).append({"query": query[:200], "problem_types": problem_types, "status": "ok" if cases else "empty", "used_case_ids": [c.get("case_id") for c in cases], "fallback": "formal_rules_only" if not cases else None})
             user["memory_cases"] = cases

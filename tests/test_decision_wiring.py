@@ -213,6 +213,23 @@ class WiringTests(unittest.TestCase):
         c = _normalize_understanding({"Understanding": {"claims": [{"claim_id": "c-03", "claim_text": "事实三"}]}})
         self.assertEqual(len(c.claims), 1)
 
+    def test_case_retrieval_uses_rule_pack_version(self):
+        """案例按 red-dot 规则包版本入库，检索不能用 config.rule_version 去查。"""
+        store = MemoryStore(self.storage.conn)
+        store.create_draft(CaseRecord(
+            case_id="c-rv", case_type="fact", problem_type="G1_SOURCE_UNVERIFIED",
+            bad_example="据RT视频：挪威首相驳斥金融时报通话报道",
+            good_example="挪威首相驳斥《金融时报》涉普京通话报道",
+            applicability="资讯类不把非权威来源写成官方陈述", source_task_id="t-old",
+            rule_version="red-dot-v0.2-modular", confirmed=True, case_status="confirmed",
+            scope="资讯 时事社会 资讯播报",
+        ))
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV11Ssf6gEUV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        used = [cid for t in (state.get("memory_trace") or []) for cid in (t.get("used_case_ids") or [])]
+        self.assertIn("c-rv", used, f"案例没有被检索到，memory_trace={state.get('memory_trace')}")
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(
