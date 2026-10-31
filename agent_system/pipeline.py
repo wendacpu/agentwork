@@ -212,6 +212,9 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
                 tr = None
         else:
             tr = None
+        grounding = str(item.get("grounding") or "grounded")
+        if grounding not in {"grounded", "inferred", "speculative"}:
+            grounding = "grounded"
         semantic_units.append(SemanticUnit(
             unit_id=str(item.get("unit_id") or f"u{i+1}"),
             meaning=str(item.get("meaning") or item.get("content") or item.get("thesis") or ""),
@@ -220,6 +223,7 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
             kind=str(item.get("kind") or "support"),
             time_range=tr,
             role_in_video=str(item.get("role_in_video") or item.get("role") or ""),
+            grounding=grounding,
             corroboration=item.get("corroboration") if isinstance(item.get("corroboration"), dict) else {},
         ))
     # 降级：模型未输出语义单元时，每条原子 claim 包成一个单元，保持旧链路行为

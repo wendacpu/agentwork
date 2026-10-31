@@ -261,6 +261,11 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("看点直接来源于输入 semantic_units", HIGHLIGHT_PROMPT)
         self.assertIn("不得把每句 ASR", HIGHLIGHT_PROMPT)
         self.assertIn("完整 ASR 话语链", HIGHLIGHT_PROMPT)
+        # 语义单元的归纳证据约束（grounding）+ 印证源改一手证据
+        self.assertIn("grounding", UNDERSTAND_PROMPT)
+        self.assertIn("grounding", BOUNDARY_PROMPT)
+        self.assertIn("grounding", HIGHLIGHT_PROMPT)
+        self.assertIn("不作印证源", UNDERSTAND_PROMPT)
 
     def test_normalize_understanding_parses_semantic_units(self):
         raw = {
@@ -273,6 +278,7 @@ class PipelineTests(unittest.TestCase):
                 {"unit_id": "u1", "meaning": "两句合起来是一个因果", "kind": "causal",
                  "claim_ids": ["c1", "c2"], "evidence_ids": ["e1", "e2"],
                  "time_range": [1.0, 5.0], "role_in_video": "主旨",
+                 "grounding": "inferred",
                  "corroboration": {"source": "description", "status": "consistent", "notes": "印证", "evidence_ids": ["e1"]}},
             ],
         }
@@ -284,6 +290,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(u.evidence_ids, ["e1", "e2"])
         self.assertEqual(u.time_range, (1.0, 5.0))
         self.assertEqual(u.role_in_video, "主旨")
+        self.assertEqual(u.grounding, "inferred")
         self.assertEqual(u.corroboration["status"], "consistent")
 
     def test_normalize_understanding_falls_back_to_claim_units(self):
@@ -296,6 +303,16 @@ class PipelineTests(unittest.TestCase):
         understanding = _normalize_understanding(raw)
         self.assertEqual([u.unit_id for u in understanding.semantic_units], ["u1", "u2"])
         self.assertEqual(understanding.semantic_units[0].claim_ids, ["c1"])
+
+    def test_normalize_understanding_grounding_fallback(self):
+        raw = {
+            "claims": [{"claim_id": "c1", "text": "第一句", "evidence_refs": ["e1"]}],
+            "semantic_units": [
+                {"unit_id": "u1", "meaning": "因果", "kind": "causal", "claim_ids": ["c1"], "evidence_ids": ["e1"], "grounding": "瞎写的"},
+            ],
+        }
+        understanding = _normalize_understanding(raw)
+        self.assertEqual(understanding.semantic_units[0].grounding, "grounded")
 
     def test_normalize_boundary_parses_unit_decisions(self):
         raw = {
@@ -318,6 +335,7 @@ class PipelineTests(unittest.TestCase):
         units = state["understanding"]["semantic_units"]
         self.assertTrue(units)
         self.assertEqual(units[0]["unit_id"], "u1")
+        self.assertEqual(units[0]["grounding"], "grounded")
         self.assertEqual(state["boundary"]["unit_decisions"][0]["unit_id"], "u1")
         self.assertTrue(state["highlights"])
         self.assertIn("unit_id", state["highlights"][0])

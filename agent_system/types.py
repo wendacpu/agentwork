@@ -85,6 +85,11 @@ class SemanticUnit:
     kind: str = "support"
     time_range: tuple[float, float] | None = None
     role_in_video: str = ""
+    # 归纳的断言级别：grounded=关系性归纳能由单元内 claim 组合直接推出；
+    # inferred=模型解读、claim 仅部分支撑；speculative=无 claim 支撑（禁止作确定看点）
+    grounding: str = "grounded"
+    # 印证源是一手证据（ASR/OCR/帧）：{status∈consistent/partial/conflict/unverified, evidence_ids, notes}
+    # description/caption/searchDesc 是理解线索，不作印证源
     corroboration: dict[str, Any] = field(default_factory=dict)
 
 

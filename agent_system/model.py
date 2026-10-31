@@ -40,7 +40,7 @@ class MockAdapter:
         if task == "understand":
             text = video.get("description") or title
             claims = [{"claim_id": "c1", "text": text[:100], "kind": "observation", "evidence_refs": evidence_ids[:1], "time_refs": []}]
-            semantic_units = [{"unit_id": "u1", "meaning": text[:100], "kind": "support", "claim_ids": ["c1"], "evidence_ids": evidence_ids[:1], "time_range": None, "role_in_video": "主旨", "corroboration": {"source": "description", "status": "consistent", "notes": "离线演示", "evidence_ids": evidence_ids[:1]}}]
+            semantic_units = [{"unit_id": "u1", "meaning": text[:100], "kind": "support", "claim_ids": ["c1"], "evidence_ids": evidence_ids[:1], "time_range": None, "role_in_video": "主旨", "grounding": "grounded", "corroboration": {"status": "consistent", "notes": "离线演示", "evidence_ids": evidence_ids[:1]}}]
             data = {"main_format": video.get("format", "未知"), "attributes": [video.get("domain", {}).get("一级", "未知")], "claims": claims, "semantic_units": semantic_units, "event_times": [], "extracted_sources": [], "conflicts": []}
         elif task == "boundary":
             unit_decisions = [{"unit_id": f"u{i+1}", "decision": "usable", "required_limits": [], "forbidden_inferences": [], "attribution_required": False, "reason": "离线临时单元判断"} for i, _ in enumerate(user.get("semantic_units", []))]
