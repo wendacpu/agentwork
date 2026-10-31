@@ -27,10 +27,10 @@ verification_required=true 表示「暂缓核验」：该陈述不进入可写�
 核实与归属要求按 U-S08 分形态分级，不逐条自由判：资讯播报、知识科普/健康运动类讲解为强制；测评走访及 opinion/prediction 为条件；剧情、表演、成果展示、现场记录为豁免。豁免类不要标 attribution_required=true——那会占用字数并让标题显得无足轻重。
 除逐条判断 candidate_claims 外，还要输出 unit_decisions：对每个语义单元判断它能否作为看点来源——usable（可忠实作为看点来源）、limited（必须保留 required_limits）、excluded（不能作为看点来源）。unit_decisions 的 unit_id 必须引用输入 semantic_units 中的 unit_id；每条含 required_limits、forbidden_inferences、attribution_required、required_source_phrase、reason。grounding 为 inferred 或 speculative 的单元，其关系性归纳是模型解读而非证据事实：即使判定 usable，也只允许作悬念/疑问类表达并显式标不确定性，不得作为确定事实写进标题；只有 grounded 单元才能承载确定事实看点。原子 claim 的事实核验（evidence_status、assertion_permission、attribution、verification_required）仍在 claim 粒度逐条做，不得因单元整体可用而跳过单元内某条 claim 的限定或归属。输出 BoundarySet。"""
 
-HIGHLIGHT_PROMPT = """任务：从语义单元（semantic_units）中理解并选择可兑现的观看价值，不写标题。
+HIGHLIGHT_PROMPT = """任务：从语义单元（semantic_units）中选择价值与钩子兼备的看点，不写标题。
 必须把整个视频作为一个连续表达单元理解，看点直接来源于输入 semantic_units，而非孤立 claim 或单句/单帧。每个看点绑定一个 unit_id，并携带该单元覆盖的 claim_ids/evidence_ids——它们是"多句话/画面/文字合起来才是一个意思"的完整语义，不得退化成单句摘录或单帧识别。联合读取 description（画面描述）、caption（意图分析）、searchDesc（上传者说明）、完整 ASR 话语链、跨时间段上下文，以及 ASR/OCR/画面证据之间的关系，再提炼视频级看点。不得把每句 ASR、每帧 OCR 或每个时间片机械地各自当成一个看点；可保留少量独立次要看点，但不得拆散依赖上下文才能理解的语义链。
-选 1 个主看点和最多 2 个备选；优先 role_in_video=主旨/主线支撑 的单元作主看点来源，转折/结论单元可作备选，边角单元不得因猎奇压过主线。写清用户能看到什么、代表性、unit_id、claim_ids、evidence_ids 与必要限定，并说明 corroboration 如何被一手证据（ASR/OCR/帧）印证或修正（consistent 可显著影响选择，partial 保留限定，conflict/unverified 不得作为确定事实写进看点）。grounding 决定看点的断言强度：只有 grounded 单元能承载确定事实看点；inferred/speculative 单元只能作悬念/疑问类钩子并显式标不确定性，不得冒充确定事实。区分局部演示和完整教程、观点和事实、片段和完整过程。不得添加新事实。
-选择顺序：先排除不可写、无法兑现、被 unit_decisions 判为 excluded 的单元；再比较它与视频主要交付的关系；优先具体内容而不是刺激性形容词；偶发细节不能因为猎奇压过主线。
+选 1 个主看点和最多 2 个备选。每个看点必须同时标注两件事：value（观看价值，用户点开后能得到什么）和 hook_type（钩子类型，用户为什么会在信息流里停下来点）。hook_type 只从固定枚举选一个：information（信息价值：直接说明是什么/有什么）、suspense（悬念：结果不告诉你）、identity（身份认同：对某群体的喊话）、conflict（冲突/争议：对立/反驳/争议）、emotion（情绪共鸣：愤怒/爽/心疼）。role_in_video 只决定该单元天然适合什么钩子（主旨/主线支撑→information，转折→suspense/conflict，结论→emotion/suspense，边角→identity/emotion/conflict），不决定它能不能当看点：主旨单元可能平淡，转折或边角单元的金句钩子更强时应选钩子更强的单元作主看点，不得默认偏主旨。写清代表性、unit_id、claim_ids、evidence_ids 与必要限定，并说明 corroboration 如何被一手证据（ASR/OCR/帧）印证或修正（consistent 可显著影响选择，partial 保留限定，conflict/unverified 不得作为确定事实写进看点）。grounding 决定看点的断言强度：只有 grounded 单元能承载确定事实看点；inferred/speculative 单元只能作悬念/疑问类钩子并显式标不确定性，不得冒充确定事实。区分局部演示和完整教程、观点和事实、片段和完整过程。不得添加新事实。
+选择顺序：先排除不可写、无法兑现、被 unit_decisions 判为 excluded 的单元；再按「钩子强度（信息流里会不会让人停下来点）」与「价值兑现（点开后能不能兑现）」综合排序，钩子强且能兑现的优先作主看点；优先具体内容而不是刺激性形容词；偶发细节的猎奇钩子不能压过主线。
 必须同时输出 eliminated：被你淘汰的角度（含被排除的语义单元），各写 angle 与 reason（为什么不能当主看点）。这条用于事后归因，不要留空。
 如果所有可用语义单元都无法形成可兑现的看点，不要硬凑：返回 {"highlights": [], "abandon": true, "reason": "具体原因"}，流程会停止并转人工，这比编一个看点更好。
 输出 HighlightSet。"""
@@ -58,7 +58,7 @@ G2 已批准业务政策：只按输入中的已批准政策判断；政策缺�
 G3 内容交付与承诺：只判断标题是否描述主看点、是否承诺了视频没有交付的内容；不要因标题短或未列出全部事实而判不完整。
 Q1 清晰度：判断指代、关系和句意是否能独立理解；不要求特定语法句式，也不评价具体信息多寡。缩写或行业黑话（FT、TV2、RT、ASR 等）未展开、读者需要额外行业知识才能读懂时，记 Q1_UNCLEAR——要求换成全称而不是加解释。
 Q2 信息价值：判断内容是否具体、可辨识且相关；不重复评事实支持或主看点覆盖。
-Q3 吸引力：只评价在事实和交付均合格前提下的表达动机与感染力；不以夸张、争议或未支持承诺加分。
+Q3 吸引力：评价在事实和交付均合格前提下，标题的钩子是否成立且是否在视频里兑现。钩子不兑现（悬念给了但视频没有答案、身份认同喊话但内容无关、情绪共鸣靠夸张煽动、冲突只是标题党）记 Q3 问题；不以夸张、争议或未支持承诺加分。钩子兑现且克制的，才在 Q3 给高分。
 质量评分只用 1/2/3：1 明显不足，2 达到基本要求，3 表现优秀；每个分数都要给简短 reason。Gate 问题不能被质量分抵消。每个问题只给一个与 issue_code 前缀一致的 primary_dimension，避免重复登记同一根因；分别给 issue_id、severity、repairable、problem_span、evidence_ids、rule_ids、reason、action、rollback_to。
 rollback_to 填这个问题应该回退到哪个节点修复：事实或限定问题填 N05，看点选择或承诺未被交付填 N07，表达与策略问题填 N09，看不出上游问题填 R01。
 检查顺序与映射固定为：事实→G1，业务规则→G2，匹配度→G3，语言→Q1，完整性→Q2，精彩度→Q3。同一条标题若策略与材料不符（例如没有方法却用「问题方法」），记 Q2_STRATEGY_MISMATCH，归 Q2。所有 evidence_ids 必须来自输入 evidence[].evidence_id；所有 rule_ids 必须来自本次 matched_rules.rule_ids、TEMP_RUBRIC.rule_ids 或已批准业务政策。

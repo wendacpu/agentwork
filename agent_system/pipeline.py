@@ -365,6 +365,9 @@ def _normalize_highlights(raw: dict[str, Any], allowed_claim_ids: set[str], fall
         value = str(item.get("value") or item.get("content") or item.get("viewer_value") or item.get("what_user_can_see") or item.get("viewpoint") or "").strip()
         if not claim_ids or not value:
             continue
+        hook_type = str(item.get("hook_type") or item.get("hook") or "")
+        if hook_type not in {"information", "suspense", "identity", "conflict", "emotion"}:
+            hook_type = ""
         result.append(Highlight(
             highlight_id=str(item.get("highlight_id") or f"h{i+1}"), claim_ids=claim_ids,
             value=value, representativeness=str(item.get("representativeness") or item.get("selection_reason") or ""),
@@ -373,6 +376,7 @@ def _normalize_highlights(raw: dict[str, Any], allowed_claim_ids: set[str], fall
             required_qualifiers=[str(x) for x in (item.get("required_qualifiers") or item.get("required_limits") or item.get("qualifiers") or [])],
             selection_reason=str(item.get("selection_reason") or item.get("representativeness") or ""),
             unit_id=str(item.get("unit_id") or item.get("semantic_unit_id") or ""),
+            hook_type=hook_type,
         ))
     return result[:3] or fallback
 

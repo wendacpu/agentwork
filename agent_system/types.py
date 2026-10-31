@@ -160,6 +160,9 @@ class Highlight:
     required_qualifiers: list[str] = field(default_factory=list)
     selection_reason: str = ""
     unit_id: str = ""
+    # 钩子类型：information(信息价值)/suspense(悬念)/identity(身份认同)/conflict(冲突争议)/emotion(情绪共鸣)
+    # 与观看价值(value)并列为看点的一等维度——价值回答"值不值得写"，钩子回答"勾不勾人"
+    hook_type: str = ""
 
 
 @dataclass

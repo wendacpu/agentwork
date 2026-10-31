@@ -50,6 +50,7 @@ class MockAdapter:
             if not decisions:
                 decisions = [{"claim_id": c.get("claim_id", "c1"), "supported_statement": c.get("text"), "evidence_refs": c.get("evidence_refs", [])} for c in claims]
             semantic_units = user.get("semantic_units", [])
+            hook_types = ["information", "suspense", "emotion"]
             highlights = [{
                 "highlight_id": f"h{i+1}", "role": "main" if i == 0 else "backup",
                 "content": d.get("supported_statement") or d.get("text") or title,
@@ -57,6 +58,7 @@ class MockAdapter:
                 "evidence_ids": d.get("evidence_refs", []), "required_qualifiers": [],
                 "selection_reason": "离线临时看点提炼",
                 "unit_id": (semantic_units[i].get("unit_id") if i < len(semantic_units) else ""),
+                "hook_type": hook_types[i % len(hook_types)],
             } for i, d in enumerate(decisions[:3])]
             data = {"highlights": highlights, "eliminated": [], "unusable_angles": []}
         elif task in {"generate", "rewrite"}:

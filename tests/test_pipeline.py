@@ -8,7 +8,7 @@ from agent_system.data import Dataset
 from agent_system.model import MockAdapter, ModelReply
 from agent_system.pipeline import Pipeline
 from agent_system.pipeline import _decide_candidate, _normalize_boundary, _normalize_candidates, _normalize_highlights, _normalize_reviews, _normalize_understanding
-from agent_system.prompts import BOUNDARY_PROMPT, HIGHLIGHT_PROMPT, UNDERSTAND_PROMPT
+from agent_system.prompts import BOUNDARY_PROMPT, HIGHLIGHT_PROMPT, REVIEW_PROMPT, UNDERSTAND_PROMPT
 from agent_system.rules import load_common_rule_ids, load_rule_bundle, rubric
 from agent_system.rules.loader import load_domain_rules, load_form_rules
 from agent_system.schemas import validate_review
@@ -266,6 +266,10 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("grounding", BOUNDARY_PROMPT)
         self.assertIn("grounding", HIGHLIGHT_PROMPT)
         self.assertIn("不作印证源", UNDERSTAND_PROMPT)
+        # 看点同时建模价值与钩子；role 决定适合什么钩子，不默认偏主旨
+        self.assertIn("hook_type", HIGHLIGHT_PROMPT)
+        self.assertIn("不得默认偏主旨", HIGHLIGHT_PROMPT)
+        self.assertIn("钩子是否成立", REVIEW_PROMPT)
 
     def test_normalize_understanding_parses_semantic_units(self):
         raw = {
@@ -325,9 +329,15 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(boundary.unit_decisions[0].decision, "usable")
 
     def test_normalize_highlights_binds_unit_id(self):
-        raw = {"highlights": [{"highlight_id": "h1", "value": "看点", "claim_ids": ["c1"], "evidence_ids": ["e1"], "unit_id": "u1", "role": "main"}]}
+        raw = {"highlights": [{"highlight_id": "h1", "value": "看点", "claim_ids": ["c1"], "evidence_ids": ["e1"], "unit_id": "u1", "role": "main", "hook_type": "suspense"}]}
         highlights = _normalize_highlights(raw, {"c1"}, [])
         self.assertEqual(highlights[0].unit_id, "u1")
+        self.assertEqual(highlights[0].hook_type, "suspense")
+
+    def test_normalize_highlights_hook_type_fallback(self):
+        raw = {"highlights": [{"highlight_id": "h1", "value": "看点", "claim_ids": ["c1"], "evidence_ids": ["e1"], "unit_id": "u1", "hook_type": "瞎写的"}]}
+        highlights = _normalize_highlights(raw, {"c1"}, [])
+        self.assertEqual(highlights[0].hook_type, "")
 
     def test_mock_run_propagates_semantic_units_through_state(self):
         task_id = self.pipeline.run("BV1Ltsf6xEpV")
@@ -340,6 +350,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(state["highlights"])
         self.assertIn("unit_id", state["highlights"][0])
         self.assertEqual(state["highlights"][0]["unit_id"], "u1")
+        self.assertEqual(state["highlights"][0]["hook_type"], "information")
 
     def test_issue_dimension_must_be_unique_and_match_code(self):
         review = {
