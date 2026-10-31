@@ -1,5 +1,7 @@
 # 数据接入契约
 
+> 本文是实现约定说明，不是最近一次数据完整性审计；样本数、字段取值和外置素材可用性须运行当前 `audit` 复核。素材路径由配置提供，文中目录布局按现行 `agent_system/data.py` 的读取逻辑描述。
+
 最终主表是 `data/source/video_dataset.json`，以 `videoID` 为稳定主键。原始素材根目录通过 `asset_root` 配置，不复制到仓库。每个 BV 目录包含 `metadata.json`、`asr_raw.json`、`ocr_raw.json` 和抽帧；同级 MP4 是视频文件。
 
 小文件的历史中文名与当前英文名见 `data/source/rename_map.json`。外置素材目录保留原来的 BV 命名，避免复制和改名带来的大文件风险。

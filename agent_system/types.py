@@ -61,6 +61,16 @@ class VideoInput:
 
 
 @dataclass
+class VerificationResult:
+    """外部实时核查结果：对一条可核查断言的真实性判定（非事实来源，是外部权威来源的交叉验证）。"""
+    claim_id: str
+    verdict: str = "unverified"          # supported / refuted / unverifiable / unverified(未核查)
+    sources: list[str] = field(default_factory=list)   # 支持或反驳的权威来源 URL
+    confidence: float = 0.0
+    query: str = ""
+
+
+@dataclass
 class Claim:
     claim_id: str
     text: str
@@ -73,6 +83,7 @@ class Claim:
     temporal_status: str = "unknown"
     assertion_permission: str = "unknown"
     entities: list[dict[str, Any]] = field(default_factory=list)
+    verification: VerificationResult | None = None   # 外部核查结果，非核查品类为 None
 
 
 @dataclass

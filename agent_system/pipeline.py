@@ -4,12 +4,14 @@ import json
 import hashlib
 import platform
 import time
+from urllib.parse import urlsplit
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from .config import RunConfig
-from .data import Dataset
+from .data import Dataset, assess_material
+from .labels import MIN_BODY_BUDGET, body_budget, extract_inline_prefixes, normalize_prefix_labels, render_labels, render_title, required_prefixes, self_declared_prefixes
 from .memory import MemoryStore
 from .model import ModelAdapter, ModelError
 from .rules import load_common_rule_ids, load_rule_bundle, load_rules, rubric
@@ -17,6 +19,10 @@ from .prompts import prompt_for
 from .schemas import GATE_IDS, QUALITY_IDS, validate_review
 from .storage import Storage
 from .types import BoundarySet, Claim, Highlight, SemanticUnit, Understanding, UnitDecision, to_dict
+from .prompts import VERIFY_PROMPT
+from .verification import create_search_provider
+from .verification.judge import compute_risk, parse_verification
+from .verification.router import is_verifiable, pick_core_claims, whitelist_for
 
 
 def _validate_ids(items: list[dict[str, Any]], key: str, allowed: set[str]) -> list[str]:
@@ -29,6 +35,14 @@ def _validate_ids(items: list[dict[str, Any]], key: str, allowed: set[str]) -> l
         if ident in seen: errors.append(f"duplicate id: {ident}")
         seen.add(ident)
     return errors
+
+
+def _norm_claim_ref(raw_id: str) -> str:
+    """把 c-1 / c01 这类模型变体统一成 c1，与 claims 的 claim_id 对齐。"""
+    text = str(raw_id)
+    if text.startswith("c-") and text[2:].isdigit():
+        return "c" + str(int(text[2:]))
+    return text
 
 
 def _claim_text(raw: dict[str, Any]) -> str:
@@ -179,7 +193,7 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
         item = dict(item)
         refs = item.get("evidence_refs") or item.get("evidence_ids") or []
         raw_claim_id = str(item.get("claim_id") or item.get("fact_id") or f"c{i+1}")
-        claim_id = "c" + str(int(raw_claim_id[2:])) if raw_claim_id.startswith("c-") and raw_claim_id[2:].isdigit() else raw_claim_id
+        claim_id = _norm_claim_ref(raw_claim_id)
         claims.append(Claim(
             claim_id=claim_id, text=_claim_text(item) or str(item.get("statement") or "未命名陈述"),
             claim_type=_claim_type(item.get("claim_type") or item.get("kind") or item.get("type")),
@@ -198,6 +212,16 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
     event_times = raw.get("event_times") or raw.get("event_time") or []
     if isinstance(event_times, dict): event_times = [event_times]
     units_raw = raw.get("semantic_units") or raw.get("semanticUnits") or []
+    # 模型常把 semantic_units 放在 Understanding/understanding 包装里，而 candidate_claims 在顶层；
+    # 只在顶层找会漏掉真单元并误走「每 claim 一个单元」的降级路径（thesis/role 全丢）。
+    if not isinstance(units_raw, list) or not units_raw:
+        for wrapper in ("Understanding", "understanding", "result", "output", "data"):
+            inner = raw.get(wrapper)
+            if isinstance(inner, dict):
+                nested_units = inner.get("semantic_units") or inner.get("semanticUnits")
+                if isinstance(nested_units, list) and nested_units:
+                    units_raw = nested_units
+                    break
     if not isinstance(units_raw, list):
         units_raw = []
     semantic_units: list[SemanticUnit] = []
@@ -218,7 +242,7 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
         semantic_units.append(SemanticUnit(
             unit_id=str(item.get("unit_id") or f"u{i+1}"),
             meaning=str(item.get("meaning") or item.get("content") or item.get("thesis") or ""),
-            claim_ids=[str(x) for x in (item.get("claim_ids") or item.get("claims") or [])],
+            claim_ids=[_norm_claim_ref(str(x)) for x in (item.get("claim_ids") or item.get("claims") or [])],
             evidence_ids=[str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])],
             kind=str(item.get("kind") or "support"),
             time_range=tr,
@@ -242,6 +266,119 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
     )
 
 
+TEXT_PRIMARY_QUALITIES = {"raw_asr", "raw_ocr"}
+
+
+def _primary_evidence_audit(understanding: Understanding, video: Any) -> dict[str, Any]:
+    """找出「材料里有可用的 ASR/OCR/原题，但这条陈述一条都没引用」的 claim。
+
+    BV1PwsR6oEKW 就是这么错的：description 写「女生抱花束递给男生」并引用了帧路径，
+    而 ASR 原文是「你吃饭了吗／就知道你还没吃」。模型对帧的引用是无意义的——它读不到
+    像素，只是在假装有视觉证据。所以只要材料里存在一手文本，就要求至少引用一条。
+
+    材料本身没有任何一手文本时（纯画面视频），这条不适用：不能因为缺 ASR 就判人家猜。
+    """
+    quality = {e.evidence_id: (e.quality or "") for e in video.evidence}
+    text_primary = {eid for eid, q in quality.items() if q in TEXT_PRIMARY_QUALITIES}
+    source_primary = {eid for eid, q in quality.items() if q == "source"}
+    if not text_primary and not source_primary:
+        return {"applicable": False, "reason": "材料没有任何一手文本（ASR/OCR/原题）可用；画面类陈述不按本项判", "claims": {}}
+    flagged: dict[str, dict[str, Any]] = {}
+    for claim in understanding.claims:
+        refs = [r for r in claim.evidence_refs if r in quality]
+        if set(refs) & (text_primary | source_primary):
+            continue
+        flagged[claim.claim_id] = {
+            "code": "G1_PRIMARY_EVIDENCE_MISSING",
+            "referenced_qualities": sorted({quality[r] for r in refs}),
+            "reason": "只引用了模型描述/画面路径，未引用任何可用的 ASR/OCR/原题原文",
+        }
+    return {"applicable": True, "claims": flagged, "claim_total": len(understanding.claims), "flagged": len(flagged),
+            "text_primary_count": len(text_primary), "source_count": len(source_primary)}
+
+
+DIALOGUE_MIN_SEGMENTS = 12      # 少于这个数，不像多轮对话
+DIALOGUE_YOU_RATIO = 0.30       # 含"你"的段占比：对话的标志，解说词几乎没有
+DIALOGUE_MAX_AVG_LEN = 10       # 平均句长：长句是播报，短句是台词
+NARRATIVE_DESC_RATIO = 0.30     # 缺一手文本的陈述占比：主线不能靠描述撑
+
+
+def _narrative_risk(video: Any, audit: dict[str, Any]) -> dict[str, Any]:
+    """给标题打「生成可信度」标记，不改变判定标准。
+
+    这条只做一件事：告诉评审者"这条是猜的"。判定仍然是三档、标准一致——系统不能因为
+    自己没把握就要求人放宽或收紧。分发侧将来按这个标记降权。
+
+    目前能测的两个信号：
+    1) 多角色对话但没有说话人标注——"你/我"互指密集而 ASR 无 speaker 字段时，
+       事件方向（谁对谁做了什么）只能靠推断。BV1PwsR6oEKW 就栽在这：把"男生让她回去"
+       理解成了"女生劝他回去"。
+    2) 主线只活在模型描述里——C22 标记占比高，说明情节主要来自 description 而非一手证据。
+    """
+    signals: list[dict[str, Any]] = []
+    segments = [str(seg.get("text") or "") for seg in (getattr(video, "asr_segments", None) or [])]
+    if segments:
+        you_ratio = sum(1 for text in segments if "你" in text) / len(segments)
+        avg_len = sum(len(text) for text in segments) / len(segments)
+        if len(segments) >= DIALOGUE_MIN_SEGMENTS and you_ratio >= DIALOGUE_YOU_RATIO and avg_len <= DIALOGUE_MAX_AVG_LEN:
+            signals.append({
+                "code": "DIALOGUE_SPEAKER_UNATTRIBUTED",
+                "value": f"{len(segments)} 段对话、{you_ratio:.0%} 段含「你」、平均 {avg_len:.1f} 字",
+                "detail": "多角色对话但 ASR 无说话人标注：谁对谁做了什么只能靠推断，人物方向可能反",
+            })
+    total = int(audit.get("claim_total") or 0)
+    if audit.get("applicable") and total:
+        ratio = int(audit.get("flagged") or 0) / total
+        if ratio >= NARRATIVE_DESC_RATIO:
+            signals.append({
+                "code": "NARRATIVE_IN_DESCRIPTION",
+                "value": f"{audit.get('flagged')}/{total} 条陈述缺一手文本",
+                "detail": "主线情节主要来自模型描述而非一手证据，细节可能是补出来的",
+            })
+    level = "high" if signals else "none"
+    return {
+        "level": level,
+        "signals": signals,
+        "note": "生成可信度低：标题仍是系统产出，判定标准不变；分发侧可按此标记降权。",
+    } if signals else {"level": "none", "signals": [], "note": ""}
+
+
+def _apply_primary_evidence_guard(boundary: BoundarySet, audit: dict[str, Any], understanding: Understanding) -> tuple[BoundarySet, int]:
+    """兜底：模型没按提示词判的，程序来判。缺一手文本的陈述不得 usable/limited。
+
+    只降级、不删除：claim 仍然留在 boundary 里并带原因，事后能追到是哪一条编的。
+    """
+    flagged = set((audit.get("claims") or {}).keys())
+    if not flagged:
+        return boundary, 0
+    downgraded = 0
+    for decision in boundary.decisions:
+        if decision.claim_id in flagged and decision.decision != "excluded":
+            decision.decision = "excluded"
+            decision.evidence_status = "unsupported"
+            note = "该陈述只有模型描述/画面路径支撑，未引用任何可用的 ASR/OCR/原题原文（C22）。"
+            decision.reason = f"{decision.reason} {note}".strip()
+            decision.rule_ids = list(dict.fromkeys([*decision.rule_ids, "U-B01"]))
+            downgraded += 1
+    # 单元是"几条陈述合起来讲一个意思"：核心陈述是编的，这个意思就不可靠。
+    # 只要求"全废"才降级会被一句真话救活整个编造场景——BV1PwsR6oEKW 的 su-01 就是
+    # 靠一句真实的「我走了」（c3）让"女生送花束"活了下来。所以过半即降级。
+    dead_units: set[str] = set()
+    for unit in understanding.semantic_units:
+        ids = list(unit.claim_ids or [])
+        if not ids:
+            continue
+        hit = sum(1 for cid in ids if cid in flagged)
+        if hit and hit * 2 >= len(ids):
+            dead_units.add(unit.unit_id)
+    for unit_decision in boundary.unit_decisions:
+        if unit_decision.unit_id in dead_units and unit_decision.decision != "excluded":
+            unit_decision.decision = "excluded"
+            note = "该单元内全部陈述都缺一手文本（C22），不能作为看点来源。"
+            unit_decision.reason = f"{unit_decision.reason} {note}".strip()
+    return boundary, downgraded
+
+
 def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None = None) -> BoundarySet:
     from .types import ClaimDecision
     if isinstance(raw.get("BoundarySet"), dict):
@@ -261,10 +398,19 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
                     break
     for key in ("boundary_set", "BoundarySet", "boundarySet"):
         nested = raw.get(key)
-        if isinstance(nested, dict) and (any(name in nested for name in ("decisions", "items", "claims", "boundaries")) or (key in {"BoundarySet", "boundarySet"} and nested and all(isinstance(value, dict) for value in nested.values()))):
+        if not isinstance(nested, dict):
+            continue
+        # boundary_set 里的 claims/unit_decisions 可能是「id 字符串列表」（全局元数据），
+        # 不是决策对象；只有元素为 dict 时才把它当决策容器展开，否则保留外层原始决策。
+        nested_claims = nested.get("claims")
+        claims_are_objects = isinstance(nested_claims, list) and bool(nested_claims) and all(isinstance(x, dict) for x in nested_claims)
+        has_decision_container = any(name in nested for name in ("decisions", "claim_decisions", "items", "boundaries"))
+        if has_decision_container or claims_are_objects or (key in {"BoundarySet", "boundarySet"} and nested and all(isinstance(value, dict) for value in nested.values())):
             raw = nested
             break
-    items = raw.get("decisions") or raw.get("items") or raw.get("claims") or raw.get("boundaries") or []
+    # 真实模型最常给的形状是 {"boundary_set": {"claim_decisions": [...]}}：
+    # 认不出就会得到 0 条 decision，然后被判 NO_USABLE_CLAIM 静默停机（20 秒 + 2 万 token 白跑）
+    items = raw.get("decisions") or raw.get("claim_decisions") or raw.get("items") or raw.get("claims") or raw.get("boundaries") or []
     if not items and isinstance(raw.get("decision"), str):
         # 模型有时把单条决策平铺返回，而不是 {"decisions": [...]}
         items = [dict(raw)]
@@ -274,6 +420,8 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
         items = [{"claim_id": claim_id, **(item if isinstance(item, dict) else {})} for claim_id, item in items.items()]
     decisions = []
     for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
         item = dict(item)
         refs = item.get("evidence_refs") or item.get("evidence_ids") or []
         decision = str(item.get("decision") or item.get("status") or item.get("verdict") or item.get("usable") or "excluded")
@@ -320,7 +468,30 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
     return BoundarySet(decisions=decisions, unresolved_issues=raw.get("unresolved_issues", []) if isinstance(raw.get("unresolved_issues", []), list) else [], global_requirements=global_requirements, unit_decisions=unit_decisions)
 
 
-def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: str | None) -> list[dict[str, Any]]:
+def _apply_verification_constraints(understanding: Understanding, boundary: BoundarySet) -> set[str]:
+    """P2 整合：把外部核查裁定为 refuted 的 claim 强制排除，并降级其所属语义单元。
+
+    P2 尚未接入 pipeline 时 claim.verification 为 None，本函数返回空集、不改变任何状态；
+    P2 把核查结果填进 claim.verification 后自动生效。
+    """
+    refuted_ids = {
+        c.claim_id for c in understanding.claims
+        if getattr(getattr(c, "verification", None), "verdict", "") == "refuted"
+    }
+    if not refuted_ids:
+        return refuted_ids
+    for decision in boundary.decisions:
+        if decision.claim_id in refuted_ids:
+            decision.decision = "excluded"
+            decision.reason = (decision.reason + "；" if decision.reason else "") + "外部核查驳回（refuted），禁止进入标题"
+    for unit in understanding.semantic_units:
+        if any(cid in refuted_ids for cid in unit.claim_ids):
+            unit.grounding = "speculative" if unit.claim_ids and all(cid in refuted_ids for cid in unit.claim_ids) else "inferred"
+    return refuted_ids
+
+
+def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: str | None, required_prefixes: list[str] | None = None) -> list[dict[str, Any]]:
+    required = list(required_prefixes or [])
     if isinstance(raw.get("AgentDraft"), dict): raw = raw["AgentDraft"]
     if isinstance(raw.get("agent_draft"), dict): raw = raw["agent_draft"]
     if isinstance(raw.get("output"), dict): raw = raw["output"]
@@ -332,6 +503,10 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
         headline = (item.get("headline") or item.get("candidate_title") or item.get("title_text")
                     or item.get("title") or item.get("copy") or item.get("draft_text") or item.get("text"))
         if not headline: continue
+        # 模型常把【剧情演绎】直接写进正文：先剥回前缀字段，正文只留可读内容
+        inline_labels, head_body = extract_inline_prefixes(str(headline))
+        declared = list(item.get("prefix_labels") or []) + inline_labels
+        prefix_labels = normalize_prefix_labels(declared, required)
         candidate_schema_errors = []
         if not (item.get("candidate_id") or item.get("draft_id") or item.get("id")): candidate_schema_errors.append("candidate_id missing from generation output")
         if not (item.get("highlight_id")): candidate_schema_errors.append("highlight_id missing from generation output")
@@ -342,7 +517,10 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
             text_id = str(claim_id)
             if text_id.startswith("c-") and text_id[2:].isdigit(): text_id = "c" + str(int(text_id[2:]))
             claim_ids.append(text_id)
-        out.append({"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(headline), "highlight_id": str(item.get("highlight_id") or "h1"), "unit_id": str(item.get("unit_id") or item.get("semantic_unit_id") or ""), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": ([str(item["qualifiers_used"])] if isinstance(item.get("qualifiers_used"), str) else [str(x) for x in (item.get("qualifiers_used") or [])]), "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors})
+        candidate = {"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(head_body), "prefix_labels": prefix_labels, "self_declared_prefixes": self_declared_prefixes(declared, required), "highlight_id": str(item.get("highlight_id") or "h1"), "unit_id": str(item.get("unit_id") or item.get("semantic_unit_id") or ""), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": ([str(item["qualifiers_used"])] if isinstance(item.get("qualifiers_used"), str) else [str(x) for x in (item.get("qualifiers_used") or [])]), "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors}
+        candidate["rendered_title"] = render_title(candidate)
+        candidate["title_length"] = len(candidate["rendered_title"])
+        out.append(candidate)
     return out
 
 
@@ -460,16 +638,27 @@ def _default_rollback(issue: dict[str, Any]) -> str:
     return "R01"
 
 
-def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], allowed_highlights: set[str], evidence_ids: set[str], max_chars: int, allowed_units: set[str] | None = None) -> dict[str, Any]:
+def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], allowed_highlights: set[str], evidence_ids: set[str], max_chars: int, allowed_units: set[str] | None = None, required_prefixes: list[str] | None = None, claim_decisions: list[Any] | None = None) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     errors.extend({"code": "G4_SCHEMA_INVALID", "repairable": True, "reason": error} for error in candidate.get("generation_schema_errors", []))
-    title = str(candidate.get("headline") or "")
-    if not title:
+    required = list(required_prefixes or [])
+    prefix_labels = [str(x) for x in (candidate.get("prefix_labels") or [])]
+    # 总长度口径：前缀 + 正文一起计入，前缀不豁免（业务方 2026-10-31 定）
+    head_body = str(candidate.get("headline") or "")
+    rendered = render_labels(prefix_labels) + head_body
+    candidate["rendered_title"] = rendered
+    if not head_body:
         errors.append({"code": "G4_EMPTY_TITLE", "repairable": True, "reason": "标题为空"})
-    if len(title) > max_chars:
-        errors.append({"code": "G4_LENGTH_EXCEEDED", "repairable": True, "reason": f"标题长度 {len(title)} 超过 {max_chars}"})
-    if title.rstrip().endswith(("?", "？")):
+    if len(rendered) > max_chars:
+        prefix_len = len(render_labels(prefix_labels))
+        errors.append({"code": "G4_LENGTH_EXCEEDED", "repairable": True, "reason": f"渲染后总长 {len(rendered)} 超过 {max_chars}（前缀 {prefix_len} 字 + 正文 {len(head_body)} 字）"})
+    if head_body.rstrip().endswith(("?", "？")):
         errors.append({"code": "G4_ENDING_QUESTION_MARK", "repairable": True, "reason": "标题不能以问号结尾"})
+    missing_prefixes = [label for label in required if label not in prefix_labels]
+    if missing_prefixes:
+        errors.append({"code": "G4_PREFIX_MISSING", "repairable": False, "reason": f"缺少平台标注前缀：{'、'.join(missing_prefixes)}"})
+    if body_budget(max_chars, required) < MIN_BODY_BUDGET:
+        errors.append({"code": "G4_PREFIX_BUDGET_EXHAUSTED", "repairable": False, "reason": f"前缀占用 {len(render_labels(required))} 字，正文预算不足，需要业务决策而非改标题"})
     if not candidate.get("candidate_id") or not candidate.get("claim_ids") or not candidate.get("evidence_ids"):
         errors.append({"code": "G4_REQUIRED_FIELD_MISSING", "repairable": True, "reason": "candidate_id、claim_ids 或 evidence_ids 缺失"})
     if candidate.get("highlight_id") not in allowed_highlights or any(x not in allowed_claims for x in candidate.get("claim_ids", [])):
@@ -480,12 +669,52 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     invalid_evidence = [x for x in candidate.get("evidence_ids", []) if x not in evidence_ids]
     if invalid_evidence:
         errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": f"无效 evidence_id: {invalid_evidence}"})
+    # 元信息表述：标题要陈述视频内容本身，不能写成「作者称/字幕称/口播称……」这类描述视频怎么说的框架
+    meta_phrases = ("作者称", "字幕称", "口播称", "旁白称", "标题称", "视频称", "文案称")
+    meta_hit = next((p for p in meta_phrases if p in head_body), None)
+    if meta_hit:
+        errors.append({"code": "G4_META_PHRASE", "repairable": True, "reason": f"标题含元信息表述「{meta_hit}」，应直接陈述视频内容而非描述视频怎么说"})
+    # 限定校验：引用了「limited 且带 required_limits」的陈述时，标题必须表达限定，
+    # 否则会把仅见于标题/声称的信息写成确定事实（等评审抓太晚，这里直接拦在生成后）。
+    if claim_decisions:
+        cited = {str(x) for x in (candidate.get("claim_ids") or [])}
+        limited_cited = [
+            d for d in claim_decisions
+            if str(getattr(d, "decision", "")) == "limited"
+            and getattr(d, "required_limits", None)
+            and str(getattr(d, "claim_id", "")) in cited
+        ]
+        if limited_cited:
+            qualifiers = [str(x).strip() for x in (candidate.get("qualifiers_used") or []) if str(x).strip()]
+            limit_phrases = ("据", "称", "网传", "疑似", "号称", "原题", "标题", "报道", "网友")
+            has_limit_phrase = any(p in head_body for p in limit_phrases)
+            if not qualifiers and not has_limit_phrase:
+                codes = "、".join(str(getattr(d, "claim_id", "")) for d in limited_cited)
+                errors.append({"code": "G1_MISSING_LIMIT", "repairable": True, "reason": f"标题引用了需限定的陈述（{codes}），但未表达限定；须写明「据标题/据称/网传」等限定，或删除该信息"})
     warnings: list[dict[str, Any]] = []
+    if candidate.get("self_declared_prefixes"):
+        warnings.append({"code": "G4_PREFIX_SELF_DECLARED", "reason": f"模型自报非必填前缀：{'、'.join(candidate['self_declared_prefixes'])}（已保留，仅观测）"})
+    if head_body.startswith(("【", "[")):
+        warnings.append({"code": "G4_INLINE_PREFIX_IN_BODY", "reason": "正文仍以方括号开头，可能残留未剥离的标注"})
     strategy = str(candidate.get("expression_strategy") or "")
     allowed_strategies = set(rubric().get("title_policy", {}).get("strategy_enum", []))
     if strategy and allowed_strategies and strategy not in allowed_strategies:
         warnings.append({"code": "Q2_STRATEGY_MISMATCH", "reason": f"策略 {strategy} 不在固定枚举内"})
-    return {"status": "fail" if errors else "pass", "errors": errors, "warnings": warnings, "title_length": len(title), "max_chars": max_chars}
+    return {"status": "fail" if errors else "pass", "errors": errors, "warnings": warnings, "title_length": len(rendered), "body_length": len(head_body), "prefix_labels": prefix_labels, "rendered_title": rendered, "max_chars": max_chars}
+
+
+# 违规处置动作的严格度：reject（不可发）> review（必须人看）> rewrite（可自动改写后重跑）
+POLICY_ACTION_STRICTNESS = {"reject": 3, "review": 2, "rewrite": 1}
+
+
+def _policy_action(rule_ids: list[str], business_policy: dict[str, Any]) -> str | None:
+    """按命中规则的 action 取最严处置；规则没写 action 时返回 None（保持旧行为）。"""
+    rules = {str(r.get("rule_id")): r for r in business_policy.get("rules", []) if isinstance(r, dict) and r.get("rule_id")}
+    actions = [str(rules[rid].get("action") or "") for rid in rule_ids if rid in rules]
+    actions = [a for a in actions if a in POLICY_ACTION_STRICTNESS]
+    if not actions:
+        return None
+    return max(actions, key=lambda a: POLICY_ACTION_STRICTNESS[a])
 
 
 def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, schema_errors: list[str], business_policy: dict[str, Any]) -> dict[str, Any]:
@@ -493,6 +722,11 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
     issues = list(review.get("issues")) if isinstance(review.get("issues"), list) else []
     if schema_errors:
         gates["G4"] = {"status": "fail", "reason": "评审输出结构校验失败", "errors": schema_errors}
+        # 评审输出坏了，但机械校验已经给出了确定结论：可修的错误先让它进重写，
+        # 否则每条"模型输出超长"都会绕过重写直接塞进人审队列（人审是最贵的一环）。
+        repairable_mechanical = [e for e in mechanical.get("errors", []) if e.get("repairable")]
+        if mechanical.get("status") == "fail" and repairable_mechanical:
+            return {"candidate_id": review.get("candidate_id"), "status": "rewrite", "reason": "G4_REPAIRABLE_WITH_INVALID_REVIEW", "gates": gates, "quality_sum": None, "issues": issues, "repairable": True}
         return {"candidate_id": review.get("candidate_id"), "status": "needs_review", "reason": "REVIEW_SCHEMA_INVALID", "gates": gates, "quality_sum": None, "issues": issues, "repairable": False}
     gates["G4"] = {"status": mechanical["status"], "reason": "程序机械校验", "errors": mechanical["errors"]}
     if business_policy.get("status") != "approved" or not business_policy.get("rules"):
@@ -502,10 +736,20 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
     quality_min = int(rubric().get("thresholds", {}).get("quality_min_each", 2))
     statuses = {key: str((gates.get(key) or {}).get("status", "needs_review")) for key in (*GATE_IDS, "G4")}
     all_pass = all(statuses[k] == "pass" for k in statuses)
-    if statuses["G2"] == "reject":
-        rule_refs = (gates.get("G2") or {}).get("rule_ids", [])
-        policy_rule_ids = {str(x.get("rule_id")) for x in business_policy.get("rules", []) if isinstance(x, dict) and x.get("rule_id")}
-        status, reason = ("reject", "EXPLICIT_BUSINESS_POLICY_REJECTION") if policy_rule_ids.intersection(rule_refs) else ("needs_review", "REJECT_WITHOUT_POLICY_RULE")
+    g2_status = statuses.get("G2")
+    g2_rule_refs = [str(x) for x in ((gates.get("G2") or {}).get("rule_ids") or [])]
+    policy_rule_ids = {str(x.get("rule_id")) for x in business_policy.get("rules", []) if isinstance(x, dict) and x.get("rule_id")}
+    # 只有评审已经判出 G2 问题时才应用处置动作；G2=pass 引用的规则是"检查过哪些"，不是"违反了哪些"
+    g2_flagged = g2_status in {"revise", "needs_review", "reject"}
+    policy_action = _policy_action(g2_rule_refs, business_policy) if (g2_rule_refs and g2_flagged) else None
+    if policy_action == "reject":
+        status, reason = "reject", "POLICY_ACTION_REJECT"
+    elif policy_action == "review":
+        status, reason = "needs_review", "POLICY_ACTION_REVIEW"
+    elif policy_action == "rewrite":
+        status, reason = "rewrite", "POLICY_ACTION_REWRITE"
+    elif g2_status == "reject":
+        status, reason = ("reject", "EXPLICIT_BUSINESS_POLICY_REJECTION") if policy_rule_ids.intersection(g2_rule_refs) else ("needs_review", "REJECT_WITHOUT_POLICY_RULE")
     elif any(status == "needs_review" for status in statuses.values()):
         status, reason = "needs_review", "CORE_FACT_OR_POLICY_UNRESOLVED"
     elif statuses["G4"] == "fail" or any(status == "revise" for status in statuses.values()) or any(isinstance(x, int) and x < quality_min for x in scores):
@@ -514,13 +758,70 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
         status, reason = "ready_for_human_review", "ALL_GATES_PASS_AND_QUALITY_MEETS_MINIMUM"
     else:
         status, reason = "needs_review", "REVIEW_RESULT_INCOMPLETE"
-    return {"candidate_id": review.get("candidate_id"), "status": status, "reason": reason, "gates": gates, "quality_sum": quality_sum, "issues": issues, "repairable": status == "rewrite"}
+    return {"candidate_id": review.get("candidate_id"), "status": status, "reason": reason, "gates": gates, "quality_sum": quality_sum, "issues": issues, "policy_action": policy_action, "repairable": status == "rewrite"}
 
 
 class Pipeline:
-    def __init__(self, dataset: Dataset, storage: Storage, adapter: ModelAdapter, config: RunConfig, review_adapter: ModelAdapter | None = None) -> None:
+    def __init__(self, dataset: Dataset, storage: Storage, adapter: ModelAdapter, config: RunConfig, review_adapter: ModelAdapter | None = None, search_provider=None) -> None:
         self.dataset, self.storage, self.adapter, self.review_adapter, self.config = dataset, storage, adapter, review_adapter or adapter, config
         self.memory = MemoryStore(storage.conn)
+        self.search_provider = search_provider
+
+    def _verify_understanding(self, task_id: str, video: Any, understanding: Understanding, state: dict[str, Any]) -> dict[str, Any] | None:
+        if not self.config.verification_enabled or not is_verifiable(video.domain, self.config):
+            return None
+        if self.search_provider is None and self.config.verification_provider.strip().lower() in {"", "none", "unconfigured"}:
+            raise RuntimeError("verification is enabled but verification_provider is not configured")
+        provider = self.search_provider or create_search_provider(
+            self.config.verification_provider,
+            secret_id_env=self.config.verification_secret_id_env,
+            secret_key_env=self.config.verification_secret_key_env,
+        )
+        claims = pick_core_claims(understanding.claims, self.config)
+        if not claims:
+            summary = {"level": "low", "refuted_claim_ids": [], "reason": "no_verifiable_claims"}
+            state["verification_risk"] = summary
+            return summary
+        sites = whitelist_for(video.domain)
+        audit_rows = []
+        for claim in claims:
+            query = claim.text.strip()
+            if not query:
+                continue
+            results = provider.search(query, sites, 10)
+            # Search is retrieval, not the judge. Empty/unusable result sets remain unknown.
+            if not results:
+                claim.verification = parse_verification({"verdict": "unverifiable", "sources": [], "confidence": 0, "query": query}, claim.claim_id)
+                audit_rows.append({"claim_id": claim.claim_id, "query": query, "results": [], "verdict": "unverifiable"})
+                continue
+            judged = self._call(task_id, "N03V", "verify", {
+                "claim": {"claim_id": claim.claim_id, "text": claim.text, "claim_type": claim.claim_type},
+                "search_results": results,
+            }, "VerificationResult", adapter=self.review_adapter)
+            result = parse_verification(judged, claim.claim_id)
+            if judged.get("claim_id") is not None and str(judged["claim_id"]) != claim.claim_id:
+                result.verdict = "unverifiable"
+                result.confidence = 0.0
+            available_urls = {str(item.get("url", "")) for item in results}
+            result.sources = [url for url in result.sources if url in available_urls]
+            # URL count alone is not source independence: syndicated pages can differ by path.
+            independent_hosts = {
+                (parsed.hostname or "").lower().removeprefix("www.")
+                for url in result.sources
+                if (parsed := urlsplit(url)).scheme in {"http", "https"} and parsed.hostname
+            }
+            if result.verdict == "refuted" and len(independent_hosts) < self.config.refute_min_sources:
+                result.verdict = "unverifiable"
+                result.confidence = min(result.confidence, 0.79)
+            claim.verification = result
+            audit_rows.append({"claim_id": claim.claim_id, "query": query, "results": results, "verdict": result.verdict, "confidence": result.confidence, "sources": result.sources})
+        summary = compute_risk(claims, self.config.refute_min_sources, self.config.refute_confidence_threshold)
+        state["verification"] = audit_rows
+        state["verification_risk"] = summary
+        state["understanding"] = to_dict(understanding)
+        self.storage.event(task_id, "N03V", "verification_complete", {"risk": summary, "claim_count": len(audit_rows)})
+        self.storage.checkpoint(task_id, "generating", state, "N03V", "verification", {"risk_level": summary["level"], "claim_count": len(audit_rows)})
+        return summary
 
     def _call(self, task_id: str, node: str, name: str, user: dict[str, Any], schema: str, adapter: ModelAdapter | None = None) -> dict[str, Any]:
         system = prompt_for(name, schema)
@@ -528,7 +829,7 @@ class Pipeline:
         request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
         prompt_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
         prompt_file = str(Path(__file__).with_name("prompts.py"))
-        prompt_constant = {"understand": "UNDERSTAND_PROMPT", "boundary": "BOUNDARY_PROMPT", "highlight": "HIGHLIGHT_PROMPT", "generate": "GENERATION_PROMPT", "rewrite": "REWRITE_PROMPT", "review": "REVIEW_PROMPT"}.get(name, "SHARED_RULES")
+        prompt_constant = {"understand": "UNDERSTAND_PROMPT", "boundary": "BOUNDARY_PROMPT", "highlight": "HIGHLIGHT_PROMPT", "generate": "GENERATION_PROMPT", "rewrite": "REWRITE_PROMPT", "review": "REVIEW_PROMPT", "verify": "VERIFY_PROMPT"}.get(name, "SHARED_RULES")
         selected_adapter = adapter or self.adapter
         model_name = str(getattr(selected_adapter, "model", self.config.review_model if name == "review" else self.config.generation_model))
         started = time.monotonic()
@@ -542,8 +843,16 @@ class Pipeline:
         last: ModelError | None = None
         for attempt in range(self.config.schema_retry_limit + 1):
             call_started = time.monotonic()
+            # 重试不能原样再问一遍：把"上次输出不是合法 JSON"告诉模型，才可能真的修好
+            attempt_user = user if attempt == 0 else {
+                **user,
+                "_previous_output_error": {
+                    "error": str(last),
+                    "instruction": "上一次输出不是合法 JSON。只返回一个严格合法的 JSON 对象：键和字符串都用双引号，字符串内的双引号必须转义，不要尾逗号，不要 markdown 代码块。",
+                },
+            }
             try:
-                reply = selected_adapter.complete(task=name, system=system, user=user, schema=schema, attempt=attempt)
+                reply = selected_adapter.complete(task=name, system=system, user=attempt_user, schema=schema, attempt=attempt)
                 if reply.status != "ok" or not isinstance(reply.data, dict): raise ModelError("invalid model response", True)
                 self.storage.event(task_id, node, "model_reply", {"task": name, "attempt": attempt, "request_hash": request_hash, "prompt_hash": prompt_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "data": reply.data})
                 self.storage.event(task_id, node, "node_completed", {"task": name, "attempt": attempt, "request_hash": request_hash, "duration_ms": int((time.monotonic() - started) * 1000), "model_latency_ms": reply.latency_ms, "cached": False})
@@ -568,7 +877,7 @@ class Pipeline:
             Path(__file__), Path(__file__).with_name("prompts.py"), Path(__file__).with_name("schemas.py"),
             Path(__file__).with_name("config.py"), Path(__file__).with_name("model.py"),
             Path(__file__).with_name("data.py"), Path(__file__).with_name("storage.py"),
-            Path(__file__).with_name("memory.py"),
+            Path(__file__).with_name("memory.py"), Path(__file__).with_name("labels.py"),
             *(root / "agent_system" / "rules" / f"{name}.py" for name in ("__init__", "loader", "router", "rubric", "models")),
             *(root / "rulepacks" / name for name in ("common.md", "domains.md", "forms.md")),
         ]
@@ -589,10 +898,12 @@ class Pipeline:
         task_id = self.storage.create_task(video_id, asdict(self.config))
         manifest = self._manifest(task_id)
         manifest["launch_source"] = launch_source
-        state: dict[str, Any] = {"video": to_dict(video), "rewrite_round": 0, "reviews": [], "candidates": [], "business_policy": self._business_policy(), "run_manifest": manifest, "prompt_hashes": {}}
+        material = assess_material(video)
+        state: dict[str, Any] = {"video": to_dict(video), "rewrite_round": 0, "reviews": [], "candidates": [], "business_policy": self._business_policy(), "run_manifest": manifest, "prompt_hashes": {}, "input_quality": material}
         self.storage.event(task_id, "N00", "run_manifest", state["run_manifest"])
         self.storage.event(task_id, "N00", "input_snapshot", state["video"])
-        self.storage.checkpoint(task_id, "prepared", state, "N00", "input", {"video_id": video_id, "evidence_count": len(video.evidence)})
+        self.storage.event(task_id, "N01", "input_quality", material)
+        self.storage.checkpoint(task_id, "prepared", state, "N00", "input", {"video_id": video_id, "evidence_count": len(video.evidence), "input_quality": material["level"]})
         return task_id
 
     def run(self, video_id: str, launch_source: str = "cli.run") -> str:
@@ -630,23 +941,47 @@ class Pipeline:
     def _execute(self, task_id: str, video: Any, state: dict[str, Any]) -> str:  # dsh-skip-func-length
         try:
             self.storage.set_state(task_id, "generating", state)
+            material = state.get("input_quality") or assess_material(video)
+            state["input_quality"] = material
+            if material.get("level") == "low" and bool(self.config.extra.get("stop_on_low_quality_input")):
+                return self._stop(task_id, state, "INSUFFICIENT_MATERIAL")
+            source_evidence_ids = sorted(e.evidence_id for e in video.evidence if e.quality == "source")
             understanding_raw = self._call(task_id, "N03", "understand", {
                 "video": to_dict(video),
                 "source_title": {
                     "text": video.title, "quality": "source",
                     "note": "唯一一手文本。可作改写基线（压缩/规整/去标题党），但不是事实依据；与材料冲突时以材料为准。",
                 },
+                "input_quality": material,
             }, "Understanding")
             understanding = _normalize_understanding(understanding_raw)
             state["understanding"] = to_dict(understanding)
+            # 一手材料使用率：claim 是否引用了 quality=source 的证据（诊断 D1 的可观测化）
+            claims_using_source = [c.claim_id for c in understanding.claims if source_evidence_ids and set(c.evidence_refs) & set(source_evidence_ids)]
+            state["source_evidence_usage"] = {"source_evidence_ids": source_evidence_ids, "claims_using_source": claims_using_source, "covered": bool(claims_using_source), "claim_total": len(understanding.claims)}
+            primary_audit = _primary_evidence_audit(understanding, video)
+            state["primary_evidence_audit"] = primary_audit
+            state["narrative_risk"] = _narrative_risk(video, primary_audit)
+            if state["narrative_risk"]["level"] != "none":
+                self.storage.event(task_id, "N03", "narrative_risk", state["narrative_risk"])
+            if primary_audit.get("applicable") and primary_audit.get("flagged"):
+                self.storage.event(task_id, "N03", "primary_evidence_missing", primary_audit)
             state["prompt_hashes"]["understand"] = self._last_prompt_hash(task_id, "N03", "understand")
-            self.storage.checkpoint(task_id, "generating", state, "N03", "understanding", {"claim_count": len(understanding.claims)})
+            self.storage.event(task_id, "N03", "source_evidence_usage", state["source_evidence_usage"])
+            self.storage.checkpoint(task_id, "generating", state, "N03", "understanding", {"claim_count": len(understanding.claims), "source_evidence_covered": bool(claims_using_source)})
+            verification_risk = self._verify_understanding(task_id, video, understanding, state)
+            if verification_risk and verification_risk.get("level") == "high":
+                state["verification_hold"] = {"reason": "HIGH_EXTERNAL_FACT_RISK", "claim_ids": verification_risk.get("refuted_claim_ids", [])}
+                state["understanding"] = to_dict(understanding)
+                self.storage.checkpoint(task_id, "pending_human", state, "N03V", "verification_hold", state["verification_hold"])
+                self.storage.event(task_id, "N03V", "verification_human_hold", state["verification_hold"])
+                return task_id
             rule_bundle = load_rule_bundle(domain=video.domain, form=video.format, attributes=understanding.attributes, version=self.config.prompt_pack_version)
             state["rules"] = rule_bundle.as_context()
             state["rule_bundle_hash"] = hashlib.sha256(json.dumps(state["rules"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             self.storage.event(task_id, "N04", "rule_match", rule_bundle.as_context())
             self.storage.checkpoint(task_id, "generating", state, "N04", "rules", {"rule_ids": state["rules"].get("rule_ids", []), "rule_bundle_hash": state["rule_bundle_hash"]})
-            boundary_raw = self._call(task_id, "N05", "boundary", {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "rules": [asdict(x) for x in load_rules()], "matched_rules": rule_bundle.as_context()}, "BoundarySet")
+            boundary_raw = self._call(task_id, "N05", "boundary", {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "primary_evidence_audit": primary_audit, "rules": [asdict(x) for x in load_rules()], "matched_rules": rule_bundle.as_context()}, "BoundarySet")
             boundary = _normalize_boundary(boundary_raw, {c.claim_id: c.text for c in understanding.claims})
             # Models sometimes format ordinal IDs as c-01/c-02. Reconcile by
             # output order only when the returned ID is not in the upstream set;
@@ -655,8 +990,18 @@ class Pipeline:
             for i, decision in enumerate(boundary.decisions):
                 if decision.claim_id not in known_claim_ids and i < len(understanding.claims):
                     decision.claim_id = understanding.claims[i].claim_id
+            # 程序兜底：材料里有一手文本、但陈述只引用模型描述/画面路径的，一律降级为不可写。
+            # 这一步必须在 allowed 计算之前，否则编造的陈述会直接进入看点与生成。
+            boundary, guarded = _apply_primary_evidence_guard(boundary, primary_audit, understanding)
+            if guarded:
+                self.storage.event(task_id, "N05", "primary_evidence_downgraded", {"downgraded_claims": guarded, "flagged_total": len(primary_audit.get("claims") or {})})
             claim_ids = {c.claim_id for c in understanding.claims}; errors = _validate_ids([to_dict(d) for d in boundary.decisions], "evidence_refs", {e.evidence_id for e in video.evidence})
             if errors: raise ModelError("boundary invalid: " + "; ".join(errors), False)
+            refuted_ids = _apply_verification_constraints(understanding, boundary)
+            if refuted_ids:
+                state["verification_refuted_claims"] = sorted(refuted_ids)
+                state["understanding"] = to_dict(understanding)
+                self.storage.event(task_id, "N05", "verification_constraint", {"refuted_claim_ids": sorted(refuted_ids)})
             state["boundary"] = to_dict(boundary)
             state["prompt_hashes"]["boundary"] = self._last_prompt_hash(task_id, "N05", "boundary")
             self.storage.checkpoint(task_id, "generating", state, "N05", "boundary", {"decision_count": len(boundary.decisions), "usable_count": sum(x.decision != "excluded" for x in boundary.decisions)})
@@ -722,6 +1067,14 @@ class Pipeline:
                         break
                 if candidates["route"]["action"] == "rewrite":
                     candidates["route"] = {**candidates["route"], "action": "stop", "rewrite_candidate_id": None, "rewrite_targets": [], "reason": "REWRITE_BUDGET_EXHAUSTED"}
+            # 输入质量闸：材料只够支撑"基线改写"时，不允许自动 handoff 一条自认为合格的标题
+            if material.get("level") == "low" and candidates["route"]["action"] == "handoff" and bool(self.config.extra.get("require_human_on_low_quality_input", True)):
+                for decision in candidates["decisions"]:
+                    if decision.get("status") == "ready_for_human_review":
+                        decision["status"] = "needs_review"
+                        decision["reason"] = "INPUT_LOW_CONFIDENCE"
+                candidates["route"] = {**candidates["route"], "action": "needs_review", "recommended_candidate_id": None, "reason": "INPUT_LOW_CONFIDENCE"}
+                self.storage.event(task_id, "Q01", "input_quality_downgrade", {"level": material.get("level"), "reasons": material.get("reasons", [])})
             state["candidates"], state["reviews"], state["candidate_decisions"], state["route"] = candidates["candidates"], candidates["reviews"], candidates["decisions"], candidates["route"]
             self.storage.save_candidates(task_id, candidates["candidates"]); self.storage.save_reviews(task_id, candidates["reviews"])
             return self._handoff(task_id, state, candidates["route"])
@@ -774,9 +1127,9 @@ class Pipeline:
             "highlights": state.get("highlights", []),
             "matched_rules": state.get("rules", {}),
             "business_policy": state.get("business_policy", {"status": "missing", "rules": [], "version": None}),
-            "display_config": {"max_chars": self.config.max_chars, "ending_question_mark_forbidden": True},
+            "display_config": {"max_chars": self.config.max_chars, "prefix_labels": state.get("required_prefixes", []), "counting": "前缀与正文合计不超过 max_chars", "ending_question_mark_forbidden": True},
             "mechanical_checks": mechanical_checks,
-            "candidate_titles": [{"candidate_id": c.get("candidate_id"), "title": c.get("headline"), "claim_ids": c.get("claim_ids", []), "highlight_id": c.get("highlight_id"), "evidence_ids": c.get("evidence_ids", []), "strategy": c.get("expression_strategy"), "qualifiers_used": c.get("qualifiers_used", [])} for c in candidates],
+            "candidate_titles": [{"candidate_id": c.get("candidate_id"), "title": c.get("headline"), "prefix_labels": c.get("prefix_labels", []), "rendered_title": c.get("rendered_title") or render_title(c), "claim_ids": c.get("claim_ids", []), "highlight_id": c.get("highlight_id"), "evidence_ids": c.get("evidence_ids", []), "strategy": c.get("expression_strategy"), "qualifiers_used": c.get("qualifiers_used", [])} for c in candidates],
             "rubric": rubric(),
         }
 
@@ -865,6 +1218,10 @@ class Pipeline:
         return {"action": "reject" if rejected else "stop", "recommended_candidate_id": None, "eligible_candidate_ids": [], "rewrite_candidate_id": None, "reason": "no_eligible_or_repairable_candidate", "rewrite_round": rewrite_round}
 
     def _generate_and_review(self, task_id: str, state: dict[str, Any], video: Any, understanding: Understanding, boundary: BoundarySet, highlights: list[Highlight], rewrite_round: int, source: dict[str, Any] | None = None) -> dict[str, Any]:
+        required = required_prefixes(format=video.format, attributes=understanding.attributes)
+        budget = body_budget(self.config.max_chars, required)
+        state["required_prefixes"] = required
+        state["body_budget"] = budget
         source_requirements = [to_dict(decision) for decision in boundary.decisions if decision.decision != "excluded" and (decision.attribution_required or decision.required_source_phrase or decision.required_limits or decision.forbidden_inferences)]
         blocked_claims = [
             {"claim_id": decision.claim_id, "forbidden_inferences": decision.forbidden_inferences,
@@ -872,7 +1229,7 @@ class Pipeline:
             for decision in boundary.decisions
             if decision.decision == "excluded" or decision.verification_required
         ]
-        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "matched_rules": state.get("rules", {}), "display_config": {"max_chars": self.config.max_chars, "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
+        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "matched_rules": state.get("rules", {}), "input_quality": state.get("input_quality", {}), "source_evidence_usage": state.get("source_evidence_usage", {}), "display_config": {"max_chars": self.config.max_chars, "max_chars_body": budget, "prefix_labels": required, "prefix_rendered": render_labels(required), "counting": "前缀与正文合计不超过 max_chars", "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
         parent_review = next((r for r in state.get("reviews", []) if r.get("candidate_id") == (source or {}).get("candidate_id")), {})
         rewrite_mode = "表达"
         if source:
@@ -900,7 +1257,7 @@ class Pipeline:
         generation_task = "rewrite" if source else "generate"
         draft = self._call(task_id, "N09", generation_task, user, "AgentDraft")
         state["prompt_hashes"][generation_task] = self._last_prompt_hash(task_id, "N09", generation_task)
-        candidates = _normalize_candidates(draft, rewrite_round, source["candidate_id"] if source else None)
+        candidates = _normalize_candidates(draft, rewrite_round, source["candidate_id"] if source else None, required_prefixes=required)
         if not candidates:
             route = {"action": "needs_review", "recommended_candidate_id": None, "eligible_candidate_ids": [], "rewrite_candidate_id": None, "reason": "GENERATION_SCHEMA_INVALID_OR_NO_CANDIDATES", "rewrite_round": rewrite_round}
             self.storage.event(task_id, "Q01", "quality_route", route)
@@ -916,8 +1273,15 @@ class Pipeline:
         if not allowed_units:
             allowed_units = {u.unit_id for u in understanding.semantic_units}
         boundary_by_claim = {d.claim_id: d for d in boundary.decisions}
+        # 候选未自带 unit_id 时，从其 highlight 反查所属语义单元补齐（仅用于定位/归因，不参与事实校验）
+        unit_by_highlight = {h.highlight_id: h.unit_id for h in highlights if h.unit_id}
         for c in candidates:
-            c["mechanical_checks"] = _mechanical_check(c, allowed_claims=allowed_claims, allowed_highlights=allowed_highlights, evidence_ids={e.evidence_id for e in video.evidence}, max_chars=self.config.max_chars, allowed_units=allowed_units)
+            if not c.get("unit_id"):
+                c["unit_id"] = unit_by_highlight.get(c.get("highlight_id", ""), "")
+        for c in candidates:
+            c["mechanical_checks"] = _mechanical_check(c, allowed_claims=allowed_claims, allowed_highlights=allowed_highlights, evidence_ids={e.evidence_id for e in video.evidence}, max_chars=self.config.max_chars, allowed_units=allowed_units, required_prefixes=required, claim_decisions=boundary.decisions)
+            c["rendered_title"] = c["mechanical_checks"]["rendered_title"]
+            c["title_length"] = c["mechanical_checks"]["title_length"]
             c["programmatic_g1_flags"] = []
             source_required = any(
                 boundary_by_claim.get(claim_id)

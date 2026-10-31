@@ -142,7 +142,7 @@ def render(tasks: list[dict], judged: set[tuple[str, str]], only_real: bool) -> 
             ]
             for c in t["state"].get("candidates") or []:
                 cid = str(c.get("candidate_id"))
-                head = str(c.get("headline") or "")
+                head = str(c.get("rendered_title") or c.get("headline") or "")
                 mech = (c.get("mechanical_checks") or {}).get("title_length", len(head))
                 g, q = gates_of(t["state"], cid)
                 flag = "✅" if (t["video_id"], cid) in judged else ("人已判" if cid in decided else "")
@@ -161,7 +161,7 @@ def render(tasks: list[dict], judged: set[tuple[str, str]], only_real: bool) -> 
         lines += ["## 二、mock / 旧链路产出：不建议占用评审时间", ""]
         for t in fake:
             video = t["state"].get("video") or {}
-            head = ((t["state"].get("candidates") or [{}])[0].get("headline") or "")[:24]
+            head = ((t["state"].get("candidates") or [{}])[0].get("rendered_title") or (t["state"].get("candidates") or [{}])[0].get("headline") or "")[:24]
             lines.append(f"- `{t['task_id']}` · {t['video_id']} · {video.get('title', '')[:22]} · provider={t['provider']} · 首条「{head}」")
         lines.append("")
 
@@ -178,7 +178,7 @@ def emit_gold(tasks: list[dict], path: Path) -> None:
         for c in t["state"].get("candidates") or []:
             rows.append({
                 "video_id": t["video_id"], "task_id": t["task_id"], "candidate_id": c.get("candidate_id"),
-                "标题": c.get("headline"), "系统路由": route.get("action"),
+                "标题": c.get("rendered_title") or c.get("headline"), "系统路由": route.get("action"),
                 "系统推荐": "是" if route.get("recommended_candidate_id") == c.get("candidate_id") else "",
             })
     path.parent.mkdir(parents=True, exist_ok=True)

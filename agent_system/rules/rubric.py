@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..labels import PREFIX_RULES
 from .models import Rule
 
 
 REVIEW_RUBRIC_VERSION = "red-dot-review-v2-uncalibrated"
+
+# 平台标注前缀的固定枚举（单一真相源在 agent_system/labels.py）
+PREFIX_ENUM = list(PREFIX_RULES)
 
 # D05 表达策略：固定枚举，条件不满足时必须落到「直接描述」
 STRATEGY_ENUM = ["问题方法", "对照比较", "前后变化", "疑问留答", "直接描述"]
@@ -67,11 +71,24 @@ TEMP_RUBRIC: dict[str, Any] = {
         "G1_UNSUPPORTED_FACT", "G1_ENTITY_ROLE_MISATTRIBUTED", "G1_SOURCE_ATTRIBUTION_MISSING", "G1_SOURCE_UNVERIFIED",
         "G1_ASSERTION_OVERSTATED", "G1_CURRENTNESS_ERROR", "G1_MISSING_LIMIT",
         "G1_PENDING_VERIFICATION",
+        # 陈述只有模型描述/画面路径支撑，没引用能用的一手文本（ASR/OCR/原题）：
+        # 这是"描述编造"的入口，比事后判定事实错更早一层
+        "G1_PRIMARY_EVIDENCE_MISSING",
         "G2_POLICY_VIOLATION", "G2_POLICY_MISSING", "G3_CORE_POINT_OMITTED", "G3_OVER_PROMISE", "G3_NOT_DELIVERED",
         "Q2_STRATEGY_MISMATCH",
         "Q1_UNCLEAR", "Q2_TOO_GENERIC", "Q3_LOW_APPEAL",
         "G4_EMPTY_TITLE", "G4_LENGTH_EXCEEDED", "G4_ENDING_QUESTION_MARK", "G4_REQUIRED_FIELD_MISSING", "G4_INVALID_REFERENCE", "G4_SCHEMA_INVALID",
+        "G4_META_PHRASE",
+        # 平台标注前缀（剧情演绎 / AI生成）：与正文合计计长，由程序判定而非模型自由判
+        "G4_PREFIX_MISSING", "G4_PREFIX_UNEXPECTED", "G4_PREFIX_BUDGET_EXHAUSTED", "G4_PREFIX_SELF_DECLARED", "G4_INLINE_PREFIX_IN_BODY",
     ],
+    "prefix_policy": {
+        "enum": list(PREFIX_ENUM),
+        "counting": "prefix_plus_body_total",
+        "owner": "program",
+        "stage": "render",
+        "min_body_budget": 6,
+    },
     "rule_ids": ["U", *[f"V{i:02d}" for i in range(1, 11)], *[f"F{i:02d}" for i in range(1, 15)], *[rule.rule_id for rule in TEMP_RULES]],
 }
 

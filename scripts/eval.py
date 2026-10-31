@@ -119,6 +119,59 @@ def rewrite_stats(tasks: dict[str, list[dict]]) -> dict:
     }
 
 
+VERDICT_CLASSES = ("可用", "勉强通过", "不可用")
+
+
+def cohens_kappa(pairs: list[tuple[str, str]]) -> float | None:
+    """两标注者的 Cohen's kappa；样本少于 2 条两份都非空时返回 None。
+
+    kappa 回答的是"两个人的口径一致吗"，不是"系统判得对吗"。
+    kappa 低时，人工一致率这个数不可解释——它可能只是在比两套不同的口径。
+    """
+    pairs = [(a, b) for a, b in pairs if a and b]
+    if len(pairs) < 2:
+        return None
+    n = len(pairs)
+    observed = sum(1 for a, b in pairs if a == b) / n
+    labels = {v for pair in pairs for v in pair}
+    expected = 0.0
+    for label in labels:
+        pa = sum(1 for a, _ in pairs if a == label) / n
+        pb = sum(1 for _, b in pairs if b == label) / n
+        expected += pa * pb
+    if expected >= 1:
+        return None
+    return (observed - expected) / (1 - expected)
+
+
+def inter_rater(gold: list[dict[str, str]]) -> dict:
+    """按 (video_id, candidate_id) 聚合同一候选的多个判定人，算成对 kappa。"""
+    grouped: dict[tuple[str, str], dict[str, str]] = {}
+    for row in gold:
+        vid = col(row, "video_id")
+        cid = col(row, "candidate_id")
+        reviewer = col(row, "判定人") or "未署名"
+        verdict = col(row, "人工判定")
+        if not vid or not cid or not verdict:
+            continue
+        grouped.setdefault((vid, cid), {})[reviewer] = verdict
+    multi = {k: v for k, v in grouped.items() if len(v) >= 2}
+    pairs: list[tuple[str, str]] = []
+    for verdicts in multi.values():
+        values = list(verdicts.values())
+        for i in range(len(values)):
+            for j in range(i + 1, len(values)):
+                pairs.append((values[i], values[j]))
+    kappa = cohens_kappa(pairs)
+    # 判定分布：三档被用成什么样（全判"勉强通过"就是口径没立住）
+    dist: dict[str, int] = {}
+    for row in gold:
+        verdict = col(row, "人工判定")
+        if verdict:
+            dist[verdict] = dist.get(verdict, 0) + 1
+    return {"multi_judged": len(multi), "pairs": len(pairs), "kappa": kappa, "distribution": dist}
+
+
 def review_gates(state: dict, candidate_id: str) -> dict[str, str]:
     for review in state.get("reviews") or []:
         if review.get("candidate_id") == candidate_id:
@@ -172,7 +225,7 @@ def main() -> int:
             "candidate_id": chosen, "verdict": verdict, "criteria": criteria,
             "system_recommended": rec, "chosen_headline": (by_id.get(chosen) or {}).get("headline", ""),
             "g1_status": review_gates(state, chosen).get("G1", ""),
-            "title_lengths": [len(str(t)) for t in rec_titles if t],
+            "title_lengths": [len(str(c.get("rendered_title") or c.get("headline") or "")) for c in candidates if (c.get("rendered_title") or c.get("headline"))],
         })
 
     # 一次通过率：同一条视频至少 1 个候选被判「可用」
@@ -201,6 +254,7 @@ def main() -> int:
     g1_miss = [r for r in g1_cases if r["g1_status"] == "pass"]
     g1_rate = len(g1_miss) / len(g1_cases) if g1_cases else None
 
+    raters = inter_rater(gold)
     rw = rewrite_stats(tasks)
     rescue = (rw["fully"] / rw["comparable"]) if rw["comparable"] else None
 
@@ -223,6 +277,26 @@ def main() -> int:
         f"| G1 漏拦率 | {pct(g1_rate)} | {len(g1_cases)} 条 G1 问题 | 人工判 G1 有问题但系统 G1=pass |",
         "",
     ]
+    dist = "，".join(f"{k} {v} 条" for k, v in sorted(raters["distribution"].items(), key=lambda kv: -kv[1])) or "—"
+    lines += [
+        "## 标注一致性",
+        "",
+        "> 人工一致率只有在 kappa 可说时才可解释：kappa 低说明两个人的口径没统一，此时那个数字在比口径，不在比系统。",
+        "",
+        "| 项 | 数值 |",
+        "|---|---|",
+        f"| 被两人以上判过的候选 | {raters['multi_judged']} 条 |",
+        f"| 可比判定对 | {raters['pairs']} 对 |",
+        f"| Cohen's kappa | {'—' if raters['kappa'] is None else f'{raters["kappa"]:.2f}'} |",
+        f"| 判定分布 | {dist} |",
+        "",
+    ]
+    if raters["kappa"] is None:
+        lines.append("⚠️ kappa 算不出来：需要同一个候选被两名标注者各判一次（锚点见 `templates/anchors.md`）。")
+    elif raters["kappa"] < 0.6:
+        lines.append("⚠️ kappa < 0.6：判定口径还没立住，先对齐锚点样例再扩大标注量，否则扩的是噪音。")
+    lines.append("")
+
     lines += [
         "## 重写有效性",
         "",

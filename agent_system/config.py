@@ -32,6 +32,17 @@ class RunConfig:
     asset_root: str = "/Users/wanting/program/新项目/复杂agent/recent-portrait-100"
     output_dir: str = "runtime"
     extra: dict[str, Any] = field(default_factory=dict)
+    # 外部实时核查配置（P2）：哪些品类核查、refuted 阈值、单视频核查条数上限
+    verification_enabled: bool = False
+    verifiable_domains: list[str] = field(default_factory=lambda: ["时事社会"])
+    excluded_domains: list[str] = field(default_factory=list)
+    verifiable_claim_types: list[str] = field(default_factory=lambda: ["observable", "source_claim"])
+    max_verification_claims: int = 3
+    refute_min_sources: int = 2
+    refute_confidence_threshold: float = 0.8
+    verification_provider: str = "none"  # none / wsa
+    verification_secret_id_env: str = "WSA_SECRET_ID"
+    verification_secret_key_env: str = "WSA_SECRET_KEY"
 
     @classmethod
     def from_json(cls, path: str | Path) -> "RunConfig":
@@ -39,6 +50,14 @@ class RunConfig:
         return cls(**data)
 
     def apply_env(self) -> "RunConfig":
+        for key, value in {
+            "verification_enabled": os.getenv("AGENT_VERIFICATION_ENABLED"),
+            "verification_provider": os.getenv("AGENT_VERIFICATION_PROVIDER"),
+            "verification_secret_id_env": os.getenv("AGENT_VERIFICATION_SECRET_ID_ENV"),
+            "verification_secret_key_env": os.getenv("AGENT_VERIFICATION_SECRET_KEY_ENV"),
+        }.items():
+            if value is not None:
+                setattr(self, key, value.strip().lower() in {"1", "true", "yes", "on"} if key == "verification_enabled" else value)
         for key, value in {
             "asset_root": os.getenv("AGENT_ASSET_ROOT"),
             "model_provider": os.getenv("AGENT_MODEL_PROVIDER"),

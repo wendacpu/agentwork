@@ -7,14 +7,14 @@ from agent_system.config import RunConfig
 from agent_system.data import Dataset
 from agent_system.model import MockAdapter, ModelReply
 from agent_system.pipeline import Pipeline
-from agent_system.pipeline import _decide_candidate, _normalize_boundary, _normalize_candidates, _normalize_highlights, _normalize_reviews, _normalize_understanding
+from agent_system.pipeline import _apply_verification_constraints, _decide_candidate, _normalize_boundary, _normalize_candidates, _normalize_highlights, _normalize_reviews, _normalize_understanding
 from agent_system.prompts import BOUNDARY_PROMPT, HIGHLIGHT_PROMPT, REVIEW_PROMPT, UNDERSTAND_PROMPT
 from agent_system.rules import load_common_rule_ids, load_rule_bundle, rubric
 from agent_system.rules.loader import load_domain_rules, load_form_rules
 from agent_system.schemas import validate_review
 from agent_system.storage import Storage
 from agent_system.memory import MemoryStore
-from agent_system.types import CaseRecord
+from agent_system.types import CaseRecord, Claim, Understanding
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +32,81 @@ class PipelineTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_verification_search_and_audit_are_persisted(self):
+        class Search:
+            def __init__(self): self.calls = []
+            def search(self, query, sites, limit):
+                self.calls.append((query, sites, limit))
+                return [{"url": "https://news.cn/a", "title": "A", "snippet": "x"}]
+            def fetch(self, url): raise AssertionError("not used")
+        class VerifyAdapter(MockAdapter):
+            def complete(self, **kwargs):
+                if kwargs["task"] == "verify":
+                    return ModelReply("ok", {"claim_id": "c1", "verdict": "supported", "sources": ["https://news.cn/a"], "confidence": 0.9, "query": "断言"})
+                return super().complete(**kwargs)
+        video = self.dataset.get("BV1Ltsf6xEpV")
+        video.domain = {"一级": "资讯", "二级": "时事社会"}
+        provider = Search()
+        config = RunConfig(asset_root=str(ASSETS), output_dir=self.tmp.name, verification_enabled=True, verification_provider="wsa")
+        pipeline = Pipeline(self.dataset, self.storage, VerifyAdapter(), config, search_provider=provider)
+        understanding = Understanding("资讯", [], [Claim("c1", "断言", "observable", [])], [], [])
+        task_id = pipeline.prepare(video.video_id)
+        state = {}
+        summary = pipeline._verify_understanding(task_id, video, understanding, state)
+        self.assertEqual(summary["level"], "low")
+        self.assertEqual(len(provider.calls), 1)
+        self.assertEqual(state["verification"][0]["sources"], ["https://news.cn/a"])
+        self.assertEqual(state["understanding"]["claims"][0]["verification"]["verdict"], "supported")
+        self.assertTrue(any(event["event_type"] == "verification_complete" for event in self.storage.events(task_id)))
+        self.assertTrue(any(event["event_type"] == "checkpoint_saved" and event["payload"].get("stage") == "verification" for event in self.storage.events(task_id)))
+
+    def test_distinct_urls_on_same_host_do_not_trigger_high_risk(self):
+        class Search:
+            def search(self, query, sites, limit):
+                return [{"url": "https://news.cn/a"}, {"url": "https://news.cn/reprint/b"}]
+            def fetch(self, url): raise AssertionError("not used")
+        class VerifyAdapter(MockAdapter):
+            def complete(self, **kwargs):
+                if kwargs["task"] == "verify":
+                    return ModelReply("ok", {"claim_id": "c1", "verdict": "refuted", "sources": ["https://news.cn/a", "https://news.cn/reprint/b"], "confidence": 0.99, "query": "claim"})
+                return super().complete(**kwargs)
+        video = self.dataset.get("BV1Ltsf6xEpV")
+        video.domain = {"一级": "资讯", "二级": "时事社会"}
+        config = RunConfig(asset_root=str(ASSETS), output_dir=self.tmp.name, verification_enabled=True, verification_provider="wsa")
+        pipeline = Pipeline(self.dataset, self.storage, VerifyAdapter(), config, search_provider=Search())
+        task_id = pipeline.prepare(video.video_id)
+        understanding = Understanding("资讯", [], [Claim("c1", "断言", "observable", [])], [], [])
+        summary = pipeline._verify_understanding(task_id, video, understanding, {})
+        self.assertEqual(summary["level"], "low")
+        self.assertEqual(understanding.claims[0].verification.verdict, "unverifiable")
+
+    def test_high_risk_verification_holds_before_generation(self):
+        class Search:
+            def search(self, query, sites, limit):
+                return [{"url": "https://news.cn/a"}, {"url": "https://xinhuanet.com/b"}]
+            def fetch(self, url): raise AssertionError("not used")
+        class VerifyAdapter(MockAdapter):
+            def __init__(self): self.generate_calls = 0
+            def complete(self, **kwargs):
+                if kwargs["task"] == "verify":
+                    return ModelReply("ok", {"claim_id": "c1", "verdict": "refuted", "sources": ["https://news.cn/a", "https://xinhuanet.com/b"], "confidence": 0.95, "query": "claim"})
+                if kwargs["task"] in {"generate", "rewrite"}: self.generate_calls += 1
+                return super().complete(**kwargs)
+        adapter = VerifyAdapter()
+        self.config.verification_enabled = True
+        self.config.verification_provider = "wsa"
+        pipeline = Pipeline(self.dataset, self.storage, adapter, self.config, search_provider=Search())
+        task_id = pipeline.prepare("BV1Ltsf6xEpV")
+        pipeline.execute(task_id)
+        row = self.storage.get_task(task_id)
+        state = json.loads(row["state_json"])
+        self.assertEqual(row["status"], "pending_human")
+        self.assertEqual(state["verification_risk"]["level"], "high")
+        self.assertEqual(state["verification_hold"]["claim_ids"], ["c1"])
+        self.assertEqual(adapter.generate_calls, 0)
+        self.assertTrue(any(event["event_type"] == "checkpoint_saved" and event["payload"].get("stage") == "verification_hold" for event in self.storage.events(task_id)))
+        self.assertTrue(any(event["event_type"] == "verification_human_hold" for event in self.storage.events(task_id)))
 
     def test_asset_audit_and_index(self):
         audit = self.dataset.audit()
@@ -266,9 +341,10 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("grounding", BOUNDARY_PROMPT)
         self.assertIn("grounding", HIGHLIGHT_PROMPT)
         self.assertIn("不作印证源", UNDERSTAND_PROMPT)
-        # 看点同时建模价值与钩子；role 决定适合什么钩子，不默认偏主旨
+        # 看点同时建模价值与钩子；主看点必须来自主旨单元（边角不压主线）
         self.assertIn("hook_type", HIGHLIGHT_PROMPT)
-        self.assertIn("不得默认偏主旨", HIGHLIGHT_PROMPT)
+        # 提示词已改为「优先来自 kind=thesis」：action/support 在 thesis 无法成看点时允许退用
+        self.assertIn("kind=thesis", HIGHLIGHT_PROMPT)
         self.assertIn("钩子是否成立", REVIEW_PROMPT)
 
     def test_normalize_understanding_parses_semantic_units(self):
@@ -351,6 +427,48 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("unit_id", state["highlights"][0])
         self.assertEqual(state["highlights"][0]["unit_id"], "u1")
         self.assertEqual(state["highlights"][0]["hook_type"], "information")
+
+    def test_verification_refuted_claim_is_excluded_and_unit_downgraded(self):
+        from types import SimpleNamespace
+        refuted = SimpleNamespace(claim_id="c1", verification=SimpleNamespace(verdict="refuted"))
+        ok = SimpleNamespace(claim_id="c2", verification=None)
+        understanding = SimpleNamespace(claims=[refuted, ok], semantic_units=[
+            SimpleNamespace(unit_id="u1", claim_ids=["c1"], grounding="grounded"),
+            SimpleNamespace(unit_id="u2", claim_ids=["c2"], grounding="grounded"),
+        ])
+        boundary = SimpleNamespace(decisions=[
+            SimpleNamespace(claim_id="c1", decision="usable", reason="原判"),
+            SimpleNamespace(claim_id="c2", decision="usable", reason="原判"),
+        ])
+        refuted_ids = _apply_verification_constraints(understanding, boundary)
+        self.assertEqual(refuted_ids, {"c1"})
+        self.assertEqual(boundary.decisions[0].decision, "excluded")
+        self.assertIn("refuted", boundary.decisions[0].reason)
+        self.assertEqual(boundary.decisions[1].decision, "usable")
+        self.assertEqual(understanding.semantic_units[0].grounding, "speculative")
+        self.assertEqual(understanding.semantic_units[1].grounding, "grounded")
+
+    def test_partial_refuted_unit_downgrades_to_inferred(self):
+        from types import SimpleNamespace
+        refuted = SimpleNamespace(claim_id="c1", verification=SimpleNamespace(verdict="refuted"))
+        supported = SimpleNamespace(claim_id="c2", verification=SimpleNamespace(verdict="supported"))
+        understanding = SimpleNamespace(claims=[refuted, supported], semantic_units=[
+            SimpleNamespace(unit_id="u1", claim_ids=["c1", "c2"], grounding="grounded"),
+        ])
+        boundary = SimpleNamespace(decisions=[
+            SimpleNamespace(claim_id="c1", decision="usable", reason=""),
+            SimpleNamespace(claim_id="c2", decision="usable", reason=""),
+        ])
+        _apply_verification_constraints(understanding, boundary)
+        self.assertEqual(understanding.semantic_units[0].grounding, "inferred")
+
+    def test_no_refuted_claims_keeps_state_unchanged(self):
+        from types import SimpleNamespace
+        understanding = SimpleNamespace(claims=[SimpleNamespace(claim_id="c1", verification=None)], semantic_units=[])
+        boundary = SimpleNamespace(decisions=[SimpleNamespace(claim_id="c1", decision="usable", reason="")])
+        refuted_ids = _apply_verification_constraints(understanding, boundary)
+        self.assertEqual(refuted_ids, set())
+        self.assertEqual(boundary.decisions[0].decision, "usable")
 
     def test_issue_dimension_must_be_unique_and_match_code(self):
         review = {

@@ -15,6 +15,7 @@ from .types import CaseRecord, HumanDecision
 from .memory import MemoryStore
 from .debugger import serve as serve_debugger
 from .goldsheet import record as record_gold, remove as remove_gold
+from .verification.search import create_search_provider
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,14 +40,16 @@ PROVIDER_DEFAULTS = {
 
 def make_pipeline(config: RunConfig, dataset: Dataset, storage: Storage) -> Pipeline:
     if config.model_provider == "mock":
-        return Pipeline(dataset, storage, MockAdapter(), config, MockAdapter())
+        search_provider = create_search_provider(config.verification_provider, secret_id_env=config.verification_secret_id_env, secret_key_env=config.verification_secret_key_env) if config.verification_enabled else None
+        return Pipeline(dataset, storage, MockAdapter(), config, MockAdapter(), search_provider)
     if config.model_provider not in PROVIDER_DEFAULTS:
         raise ValueError(f"unknown provider: {config.model_provider}")
     default_base, default_key = PROVIDER_DEFAULTS[config.model_provider]
     base, key_env = config.base_url or default_base, config.api_key_env or default_key
     adapter = OpenAICompatibleAdapter(base, key_env, config.generation_model, reasoning_effort=config.reasoning_effort)
     review_adapter = OpenAICompatibleAdapter(base, key_env, config.review_model, reasoning_effort=config.reasoning_effort)
-    return Pipeline(dataset, storage, adapter, config, review_adapter)
+    search_provider = create_search_provider(config.verification_provider, secret_id_env=config.verification_secret_id_env, secret_key_env=config.verification_secret_key_env) if config.verification_enabled else None
+    return Pipeline(dataset, storage, adapter, config, review_adapter, search_provider)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         route = state.get("route") or {}
         path = record_gold(
             video_id=row["video_id"], task_id=args.task_id, candidate_id=args.candidate_id,
-            headline=str(candidate.get("headline") or ""),
+            headline=str(candidate.get("rendered_title") or candidate.get("headline") or ""),
             verdict={"approved": "可用", "marginal": "勉强通过"}.get(args.decision, "不可用"),
             final_headline=args.headline, criteria_id=args.criteria, fallback_node="",
             reason=args.reason, reviewer=args.reviewer or "unnamed", route=str(route.get("action") or ""),

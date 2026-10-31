@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.request
 import urllib.error
@@ -27,6 +28,37 @@ class ModelReply:
 
 class ModelAdapter(Protocol):
     def complete(self, *, task: str, system: str, user: dict[str, Any], schema: str, attempt: int = 0) -> ModelReply: ...
+
+
+def loads_json_loose(text: str) -> Any:
+    """容忍模型最常见的 JSON 坏法：代码块包裹、前后杂质、尾逗号、行尾多余逗号。
+
+    评审/生成节点的输出坏一次就是一次 10 秒 + 2 万 token 的重跑；宽松解析能救回大部分，
+    救不回的由上层带着错误信息重试（那次才是真修复）。失败时把坏位置附近文本带进错误信息，
+    方便定位是哪种坏法（未转义引号 / 注释 / 单引号 / 多个对象拼接）。
+    """
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", raw)
+        raw = re.sub(r"\s*```\s*$", "", raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # 去掉 JSON 主体前后的杂质（模型有时在前面写解释、后面留尾巴）
+    start, end = raw.find("{"), raw.rfind("}")
+    body = raw[start:end + 1] if start != -1 and end > start else raw
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        pass
+    repaired = re.sub(r",(\s*[}\]])", r"\1", body)
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError as exc:
+        pos = getattr(exc, "pos", 0) or 0
+        snippet = body[max(0, pos - 60):pos + 60]
+        raise json.JSONDecodeError(f"{exc.msg} @char {pos} 附近: {snippet}", body, pos) from exc
 
 
 class MockAdapter:
@@ -64,16 +96,21 @@ class MockAdapter:
         elif task in {"generate", "rewrite"}:
             highlights = user.get("highlights", [{"highlight_id": "h1", "value": title}])
             base = (highlights[0].get("value") if highlights else title) or title
-            suffix = "｜视频看点" if task == "generate" else "｜重新聚焦"
             count = 1 if task == "rewrite" else min(int(user.get("target_count", 3)), 3)
+            # 遵守正文预算：平台前缀（剧情演绎/AI生成）会占用 max_chars 的一部分
+            budget = int((user.get("display_config") or {}).get("max_chars_body") or 20)
             candidates = []
             for i in range(count):
                 h = highlights[i % max(len(highlights), 1)] if highlights else {"highlight_id": "h1", "value": title}
                 strategies = ["直接描述", "问题方法", "前后变化"]
-                candidates.append({"candidate_id": f"a{int(user.get('rewrite_round', 0))+1}-{i+1}", "headline": (str(h.get("value", base))[:12] + strategies[i % 3])[:20], "highlight_id": h.get("highlight_id", "h1"), "unit_id": h.get("unit_id", ""), "claim_ids": [c.get("claim_id", "c1") for c in claims[:1]], "evidence_ids": h.get("evidence_ids") or h.get("delivery_evidence_refs", []), "expression_strategy": strategies[i % 3], "qualifiers_used": [], "used_case_ids": [], "generation_round": user.get("rewrite_round", 0), "parent_candidate_id": user.get("parent_candidate_id"), "change_reason": "离线演示" if task == "rewrite" else ""})
+                tail = strategies[i % 3]
+                head = (str(h.get("value", base))[: max(0, budget - len(tail))] + tail)[:budget]
+                candidates.append({"candidate_id": f"a{int(user.get('rewrite_round', 0))+1}-{i+1}", "headline": head, "highlight_id": h.get("highlight_id", "h1"), "unit_id": h.get("unit_id", ""), "claim_ids": [c.get("claim_id", "c1") for c in claims[:1]], "evidence_ids": h.get("evidence_ids") or h.get("delivery_evidence_refs", []), "expression_strategy": strategies[i % 3], "qualifiers_used": [], "used_case_ids": [], "generation_round": user.get("rewrite_round", 0), "parent_candidate_id": user.get("parent_candidate_id"), "change_reason": "离线演示" if task == "rewrite" else ""})
             data = {"candidates": candidates, "memory_trace": [], "shortfall_reason": None}
         elif task == "review":
             candidates = user.get("candidate_titles", [])
+            # 已批准业务政策存在时，G2 pass 必须引用一条适用规则（与 schemas 校验一致）
+            policy_rules = [str(x.get("rule_id")) for x in ((user.get("business_policy") or {}).get("rules") or []) if isinstance(x, dict) and x.get("rule_id")]
             reviews = []
             for c in candidates:
                 reviews.append({
@@ -81,7 +118,7 @@ class MockAdapter:
                     "expected_takeaway": {"subject": "材料中的主体", "content_nature": "视频内容", "viewing_promise": "了解视频中的具体看点"},
                     "gates": {
                         "G1": {"status": "pass", "reason": "离线临时评审", "evidence_ids": evidence_ids[:1], "rule_ids": []},
-                        "G2": {"status": "pass", "reason": "离线临时评审", "evidence_ids": [], "rule_ids": []},
+                        "G2": {"status": "pass", "reason": "离线临时评审（未触发禁止项）", "evidence_ids": [], "rule_ids": policy_rules[:1]},
                         "G3": {"status": "pass", "reason": "离线临时评审", "evidence_ids": evidence_ids[:1], "rule_ids": []},
                     },
                     "quality": {quality: {"score": 2, "reason": "离线临时评审"} for quality in ("Q1", "Q2", "Q3")},
@@ -118,7 +155,7 @@ class OpenAICompatibleAdapter:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 body = json.loads(response.read().decode())
             text = body["choices"][0]["message"]["content"]
-            return ModelReply("ok", json.loads(text), text, body.get("usage"), int((time.monotonic() - start) * 1000))
+            return ModelReply("ok", loads_json_loose(text), text, body.get("usage"), int((time.monotonic() - start) * 1000))
         except urllib.error.HTTPError as exc:
             # Authentication, request-shape and payment/quota failures do not
             # improve by repeating the same call. Network/server failures do.

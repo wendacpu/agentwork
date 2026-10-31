@@ -1,7 +1,7 @@
 # Bad Case 001 诊断：为什么系统推出的还不如原视频标题
 
 > 样本：`BV11Ssf6gEUV`（挪威首相驳斥 FT 涉普京通话报道），任务 `task-2774ceefc71e`
-> 规则包 `red-dot-v0.2-modular`，模型 deepseek-chat，2026-10-30 运行
+> 历史任务快照：规则包 `red-dot-v0.2-modular`，模型 deepseek-chat，运行于 2026-10-30；以下归因与修复建议仅针对该次任务，不代表当前系统状态。
 > 人工判定：cand-1 不可用（C19）、cand-2 不可用（C08;C20）、cand-3 勉强通过（C20）
 
 ## 一、现象

@@ -37,8 +37,12 @@ def validate_review(item: dict[str, Any], *, evidence_ids: set[str], rule_ids: s
                 gate_evidence, gate_rules = [], []
             if gate_id in {"G1", "G3"} and gate.get("status") == "pass" and not gate_evidence:
                 errors.append(f"{gate_id} pass requires evidence_ids")
-            if gate_id == "G2" and gate.get("status") == "pass" and policy_rule_ids and not policy_rule_ids.intersection(str(x) for x in gate_rules):
-                errors.append("G2 pass requires an applicable approved policy rule_id")
+            # G2=pass 的语义是「检查过且都没命中」，此时不要求引用具体规则——要求引用会把
+            # "没违规"变成结构错误，真实模型大面积返回 pass + 空 rule_ids，全被判 schema 失败。
+            # 只有判定违规（reject/revise）时才必须引用到具体规则，否则驳回无从追溯（由程序侧
+            # REJECT_WITHOUT_POLICY_RULE 兜底）。
+            if gate_id == "G2" and gate.get("status") in {"reject", "revise"} and policy_rule_ids and not gate_rules:
+                errors.append("G2 reject/revise requires at least one approved policy rule_id")
             for ref in gate_evidence:
                 if ref not in evidence_ids:
                     errors.append(f"{gate_id} invalid evidence_id: {ref}")

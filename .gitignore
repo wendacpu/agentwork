@@ -8,3 +8,9 @@ node_modules.orig/
 .secrets.env
 .secrets/
 config.review-batch.json
+# 本地验证用的临时配置（只差 output_dir，不随仓库走）
+config.verify_new*.json
+.pytest_cache/
+.env
+.env.*
+!.env.example

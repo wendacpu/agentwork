@@ -1,6 +1,8 @@
 # 规则校正与拆分技术设计
 
-## 审计结论
+> 本文记录该次重构的设计依据与方案；其中“当前代码”均指写作时检查的版本，不代表现行实现。要判断现状请核对代码、规则包与测试。
+
+## 历史审计结论
 
 | 缺陷 | 当前代码是否存在 | 依据与处理 |
 |---|---|---|
@@ -80,7 +82,7 @@ agent_system/
 
 `load_rule_bundle()` 继续作为公共入口；`RuleBundle.as_context()` 保留现有字段，并新增来源文件列表。模块化 loader 分别解析三个文件；router 选择匹配的 V/F block，缺失与冲突写入 trace/gaps/conflicts。现有 pipeline 导入不变。
 
-## 实施顺序与验证
+## 当时拟定的实施顺序与验证（非当前计划）
 
 1. 先更新 Claim/Boundary 结构、review Gate/Rubric 和生成/边界/评审/重写 Prompt；移除固定 information chain 与具名实体全保留。
 2. 使用当前真实样例核对新字段映射、来源关系和旧数据兼容。

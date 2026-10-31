@@ -133,3 +133,56 @@ class Dataset:
             elif not _asr_segments(folder / "asr_raw.json"): out["empty_asr"] += 1
         return out
 
+
+def _chinese_ratio(text: str) -> float:
+    text = re.sub(r"\s+", "", text or "")
+    if not text:
+        return 0.0
+    return sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff") / len(text)
+
+
+def assess_material(video: VideoInput) -> dict[str, Any]:
+    """输入质量闸：这堆材料够不够支撑一次"提炼看点"。
+
+    已知事实：100 条样本里 18 条 ASR 为空；OCR 常有整屏乱码（诊断 D1 那条视频
+    ASR 0 段、OCR 全是「RT 令日俄罗斯 Bi」这类碎片）。这类输入继续跑，模型只能靠
+    description/caption（本身也是模型派生）反推，产出的标题人工也判不出错在哪。
+
+    分级不看"文件在不在"，看"一手信息够不够"：
+    - high：ASR >= 5 段（有连续话语链，语义单元能落地）
+    - medium：有 ASR 但 < 5 段，或 ASR 空但有可用 OCR
+    - low：ASR 空 且 OCR 中文占比 < 0.5（只剩标题与模型派生描述）
+    """
+    asr_count = len([x for x in video.asr_segments if _norm_text(x.get("text"))])
+    ocr_text = " ".join(_norm_text(x.get("text")) for x in video.ocr_segments)
+    ocr_count = len(video.ocr_segments)
+    ocr_zh = round(_chinese_ratio(ocr_text), 3)
+    usable_ocr = ocr_count if ocr_zh >= 0.5 else 0
+    if asr_count >= 5:
+        level = "high"
+    elif asr_count >= 1 or usable_ocr >= 1:
+        level = "medium"
+    else:
+        level = "low"
+    reasons: list[str] = []
+    if asr_count == 0:
+        reasons.append("asr_empty")
+    if ocr_count and ocr_zh < 0.5:
+        reasons.append("ocr_low_chinese_ratio")
+    if not video.title.strip():
+        reasons.append("title_empty")
+    return {
+        "level": level,
+        "asr_segments": asr_count,
+        "ocr_segments": ocr_count,
+        "ocr_chinese_ratio": ocr_zh,
+        "usable_ocr_segments": usable_ocr,
+        "has_source_title": bool(video.title.strip()),
+        "reasons": reasons,
+        "advice": {
+            "high": "材料充足，正常提炼看点",
+            "medium": "一手证据偏薄，语义单元必须以标记 corroboration=unverified 的谨慎口径输出",
+            "low": "一手证据不足：只能以原视频标题为基线改写，标题须限制在 source_title 支持的范围，并强制人审",
+        }[level],
+    }
+

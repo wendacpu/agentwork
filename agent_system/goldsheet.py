@@ -56,7 +56,12 @@ def upsert(entry: dict[str, str], path: Path | None = None) -> Path:
             rows = list(reader)
     if not header:
         header = ["video_id", "task_id", "candidate_id", "标题", "系统路由", "系统推荐",
-                  "人工判定", "人工最终标题", "命中的判据ID", "建议回退节点", "一句话理由", "判定人", "判定日期"]
+                  "人工判定", "人工最终标题", "驳回原因", "命中的判据ID", "建议回退节点", "一句话理由", "判定人", "判定日期"]
+    else:
+        # 旧表头没有的新字段（如后来才加的「驳回原因」）就地补列，不让历史行报错
+        for key in entry:
+            if key and key not in header and not any(str(h).startswith(key) for h in header):
+                header.append(key)
 
     def value_of(key: str) -> str:
         """gold.csv 表头可能带括号说明，按前缀匹配字段名。"""
@@ -110,8 +115,8 @@ def remove(*, video_id: str, candidate_id: str, path: Path | None = None) -> Pat
 
 def record(*, video_id: str, task_id: str, candidate_id: str, headline: str, verdict: str,
            final_headline: str | None, criteria_id: str, fallback_node: str, reason: str,
-           reviewer: str, route: str = "", recommended: str = "", day: str | None = None,
-           path: Path | None = None) -> Path:
+           reviewer: str, route: str = "", recommended: str = "", rejection_reason: str = "",
+           day: str | None = None, path: Path | None = None) -> Path:
     return upsert({
         "video_id": video_id,
         "task_id": task_id,
@@ -121,6 +126,7 @@ def record(*, video_id: str, task_id: str, candidate_id: str, headline: str, ver
         "系统推荐": recommended,
         "人工判定": verdict,
         "人工最终标题": final_headline or "",
+        "驳回原因": rejection_reason or "",
         "命中的判据ID": criteria_id or "",
         "建议回退节点": fallback_node or "",
         "一句话理由": reason,

@@ -283,6 +283,31 @@ class WiringTests(unittest.TestCase):
             verdict_key = next(k for k in restored if k.startswith("人工判定"))
             self.assertEqual(restored[verdict_key], "可用")
 
+    def test_rejection_reason_lands_in_new_gold_column(self):
+        """「驳回原因」要能直接统计，否则判了几十条也说不清主要失败在哪一类。"""
+        with tempfile.TemporaryDirectory() as td:
+            gold = Path(td) / "gold.csv"
+            record_gold(video_id="v1", task_id="t1", candidate_id="c1", headline="标题", verdict="不可用",
+                        final_headline=None, criteria_id="", fallback_node="", reason="主体写反了",
+                        reviewer="me", rejection_reason="事实错误", path=gold)
+            with gold.open(encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]["驳回原因"], "事实错误")
+
+    def test_old_gold_without_reason_column_still_works(self):
+        """历史 gold.csv 没有「驳回原因」列，写入时要就地补列，不能整表报错。"""
+        with tempfile.TemporaryDirectory() as td:
+            gold = Path(td) / "gold.csv"
+            gold.write_text("video_id,task_id,candidate_id,标题,人工判定\nv1,t1,c1,旧标题,可用\n", encoding="utf-8-sig")
+            record_gold(video_id="v1", task_id="t1", candidate_id="c1", headline="旧标题", verdict="不可用",
+                        final_headline=None, criteria_id="", fallback_node="", reason="改判",
+                        reviewer="me", rejection_reason="没写到核心看点", path=gold)
+            with gold.open(encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+            self.assertIn("驳回原因", rows[0])
+            self.assertEqual(rows[0]["驳回原因"], "没写到核心看点")
+            self.assertEqual(rows[0]["人工判定"], "不可用")
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(

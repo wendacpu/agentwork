@@ -10,5 +10,12 @@
   "max_chars": 20,
   "max_rewrite_rounds": 2,
   "schema_retry_limit": 1,
-  "memory_call_limit": 6
+  "memory_call_limit": 6,
+  "verification_enabled": false,
+  "verification_provider": "wsa",
+  "verification_secret_id_env": "WSA_SECRET_ID",
+  "verification_secret_key_env": "WSA_SECRET_KEY",
+  "max_verification_claims": 3,
+  "refute_min_sources": 2,
+  "refute_confidence_threshold": 0.8
 }
