@@ -83,6 +83,8 @@ class Claim:
     temporal_status: str = "unknown"
     assertion_permission: str = "unknown"
     entities: list[dict[str, Any]] = field(default_factory=list)
+    # 外部核查用的检索词：应是可核查的事实断言，而非画面/剪辑描述。模型可显式给出，程序有兜底抽取。
+    verification_query: str = ""
     verification: VerificationResult | None = None   # 外部核查结果，非核查品类为 None
 
 
@@ -105,6 +107,37 @@ class SemanticUnit:
 
 
 @dataclass
+class EventNode:
+    """事件时间线上的一环：谁、做了什么、在叙事哪个阶段、有什么证据。
+
+    与 claim 的区别：claim 是"某句话/某个事实为真"，event 是"这件事发生了"。
+    "她迟到"这件事可能没有任何一句台词的 claim 直接支撑（只有"定十个闹钟"这个标题线索），
+    但它决定了整条视频的反差结构。没有事件层，看点只能停在台词摘录。
+    """
+    event_id: str
+    actor: str
+    action: str
+    when: str = "现场"          # 前情 / 现场 / 结尾
+    evidence_ids: list[str] = field(default_factory=list)
+    confidence: str = "inferred"  # grounded / inferred / speculative
+
+
+@dataclass
+class EventTurn:
+    """事件之间的转折关系：反差(contrast)/因果(causal)/转折(turn)/顺承(sequence)。
+
+    contrast 是「预期违背」：按前一件事本该发生 X，实际发生了 Y。
+    「女生迟到反被关心」就是 contrast——这是看点的价值所在，而不是某个事实。
+    """
+    from_event: str
+    to_event: str
+    type: str = "sequence"
+    note: str = ""
+    # 反差必须说得清「按常理本该发生什么」；说不出就不是反差，只是顺承
+    expectation: str = ""
+
+
+@dataclass
 class Understanding:
     main_format: str
     attributes: list[str]
@@ -113,6 +146,9 @@ class Understanding:
     extracted_sources: list[SourceRef]
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     semantic_units: list[SemanticUnit] = field(default_factory=list)
+    # 事件时间线：把零碎 claim/台词组织成"发生了什么"，供看点选择识别反差与因果
+    events: list[EventNode] = field(default_factory=list)
+    turns: list[EventTurn] = field(default_factory=list)
 
 
 @dataclass

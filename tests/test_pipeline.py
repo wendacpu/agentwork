@@ -108,6 +108,24 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(any(event["event_type"] == "checkpoint_saved" and event["payload"].get("stage") == "verification_hold" for event in self.storage.events(task_id)))
         self.assertTrue(any(event["event_type"] == "verification_human_hold" for event in self.storage.events(task_id)))
 
+    def test_mock_adapter_supports_verify_so_full_run_reaches_generation(self):
+        """离线全链路：检索被调用且审计落库，mock 核查保守返回 unverifiable 不阻断生成。"""
+        class Search:
+            def search(self, query, sites, limit):
+                return [{"url": "https://news.cn/a", "title": "A", "snippet": "x"}]
+            def fetch(self, url): raise AssertionError("not used")
+        self.config.verification_enabled = True
+        self.config.verification_provider = "wsa"
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config, search_provider=Search())
+        task_id = pipeline.run("BV11Ssf6gEUV")
+        row = self.storage.get_task(task_id)
+        state = json.loads(row["state_json"])
+        self.assertEqual(row["status"], "pending_human")
+        self.assertTrue(state["verification"])
+        self.assertEqual(state["verification"][0]["verdict"], "unverifiable")
+        self.assertEqual(state["verification_risk"]["level"], "low")
+        self.assertTrue(state["candidates"])
+
     def test_asset_audit_and_index(self):
         audit = self.dataset.audit()
         self.assertEqual(audit["count"], 100)
@@ -119,7 +137,7 @@ class PipelineTests(unittest.TestCase):
     def test_red_dot_rule_bundle_routes_domain_and_form(self):
         bundle = load_rule_bundle(domain={"一级": "资讯", "二级": "时事社会"}, form="资讯播报")
         self.assertEqual(bundle.version, "red-dot-v0.2-modular")
-        self.assertEqual(bundle.rule_ids, ["U", "V04", "F11"])
+        self.assertEqual(bundle.rule_ids, ["U", "V04", "V11", "F11"])
         self.assertEqual({x["scope"] for x in bundle.match_trace}, {"domain", "form"})
 
     def test_mock_run_records_rule_bundle_and_highlights(self):
@@ -234,10 +252,10 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("U-V03", load_common_rule_ids())
 
     def test_rule_sources_are_modular_and_complete(self):
-        self.assertEqual(set(load_domain_rules()), {f"V{i:02d}" for i in range(1, 11)})
+        self.assertEqual(set(load_domain_rules()), {f"V{i:02d}" for i in range(1, 17)})
         self.assertEqual(set(load_form_rules()), {f"F{i:02d}" for i in range(1, 15)})
         bundle = load_rule_bundle(domain={"一级": "资讯", "二级": "时事社会"}, form="资讯播报")
-        self.assertEqual(bundle.rule_ids, ["U", "V04", "F11"])
+        self.assertEqual(bundle.rule_ids, ["U", "V04", "V11", "F11"])
         self.assertEqual(len(bundle.sources), 3)
 
     def test_claim_model_keeps_orthogonal_axes_and_legacy_compatibility(self):

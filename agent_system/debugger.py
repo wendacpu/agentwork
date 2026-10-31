@@ -117,7 +117,8 @@ def serve(config: RunConfig, dataset: Dataset, db_path: str | list[str], pipelin
     def storage_for(task_id: str | None = None) -> Storage:
         if task_id and task_id not in task_db:
             index_tasks()
-        return Storage(task_db.get(task_id, primary_db) if task_id else primary_db)
+        # 判定写案例时用同一个独立案例库，保证跨实验目录可复用
+        return Storage(task_db.get(task_id, primary_db) if task_id else primary_db, case_bank_path=(getattr(config, "case_bank", "") or None))
 
     for db in db_paths:
         try:

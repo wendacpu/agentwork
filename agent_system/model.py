@@ -73,7 +73,8 @@ class MockAdapter:
             text = video.get("description") or title
             claims = [{"claim_id": "c1", "text": text[:100], "kind": "observation", "evidence_refs": evidence_ids[:1], "time_refs": []}]
             semantic_units = [{"unit_id": "u1", "meaning": text[:100], "kind": "support", "claim_ids": ["c1"], "evidence_ids": evidence_ids[:1], "time_range": None, "role_in_video": "主旨", "grounding": "grounded", "corroboration": {"status": "consistent", "notes": "离线演示", "evidence_ids": evidence_ids[:1]}}]
-            data = {"main_format": video.get("format", "未知"), "attributes": [video.get("domain", {}).get("一级", "未知")], "claims": claims, "semantic_units": semantic_units, "event_times": [], "extracted_sources": [], "conflicts": []}
+            events = [{"event_id": "e1", "actor": "一方", "action": text[:40], "when": "现场", "evidence_ids": evidence_ids[:1], "confidence": "grounded"}]
+            data = {"main_format": video.get("format", "未知"), "attributes": [video.get("domain", {}).get("一级", "未知")], "claims": claims, "semantic_units": semantic_units, "events": events, "turns": [], "event_times": [], "extracted_sources": [], "conflicts": []}
         elif task == "boundary":
             unit_decisions = [{"unit_id": f"u{i+1}", "decision": "usable", "required_limits": [], "forbidden_inferences": [], "attribution_required": False, "reason": "离线临时单元判断"} for i, _ in enumerate(user.get("semantic_units", []))]
             data = {"decisions": [{"claim_id": c.get("claim_id", "c1"), "supported_statement": c.get("text"), "decision": "usable", "evidence_refs": c.get("evidence_refs", []), "required_limits": [], "forbidden_inferences": ["不得添加材料未出现的事实"], "rule_ids": ["B-FACT"], "verification_required": False, "reason": "临时规则下可忠实表达"} for c in claims], "unit_decisions": unit_decisions, "unresolved_issues": []}
@@ -126,6 +127,16 @@ class MockAdapter:
                     "memory_query": {"problem_types": [], "query": ""},
                 })
             data = {"reviews": reviews, "rubric_version": "red-dot-review-v2-uncalibrated"}
+        elif task == "verify":
+            # 离线适配器没有真实核查能力：一律返回 unverifiable，绝不凭空编造反驳证据。
+            claim = user.get("claim", {})
+            data = {
+                "claim_id": claim.get("claim_id", ""),
+                "verdict": "unverifiable",
+                "sources": [],
+                "confidence": 0.0,
+                "query": claim.get("text", ""),
+            }
         else:
             raise ModelError(f"mock task unsupported: {task}", retryable=False)
         return ModelReply("ok", data, json.dumps(data, ensure_ascii=False), {"prompt_tokens": 0, "completion_tokens": 0}, int((time.monotonic() - start) * 1000))

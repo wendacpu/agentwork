@@ -1,0 +1,170 @@
+{
+  "version": "eval-v1",
+  "created": "2026-11",
+  "rule_version": "red-dot-v0.2-modular",
+  "max_chars": 20,
+  "sample_size": 20,
+  "note": "固定评测样本集：选定后不换。task_id 在首次跑完后回填，防止跨版本错配；mock 样本不计入。",
+  "samples": [
+    {
+      "video_id": "BV1CFnq68Ezt",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "时事社会",
+      "form": "资讯播报",
+      "title": "成都“二仙桥大爷”再次因电动车违规载货被交警拦下，谭乔证实消息属实，此次警方人性化处置 没有罚款"
+    },
+    {
+      "video_id": "BV1Ltsf6xEpV",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "时事社会",
+      "form": "资讯播报",
+      "title": "官方通报“一中学筛查肺结核时，多名学生共用一个针头”：共涉及78名学生，系一名医护人员违反操作规范。"
+    },
+    {
+      "video_id": "BV1r2HF64ESS",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "体育赛事",
+      "form": "访谈对谈",
+      "title": "萨戈夫赛后采访：我不会说自己强于德文了，他是个传奇"
+    },
+    {
+      "video_id": "BV1P9sf6BEHJ",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "体育赛事",
+      "form": "资讯播报",
+      "title": "南非一球场边写字楼里两员工正偷看球赛被球场大屏抓包后一秒归位"
+    },
+    {
+      "video_id": "BV1oxnR6iEpJ",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "财经商业",
+      "form": "观点评论",
+      "title": "国内财经新闻的误导性很强，做投资需核实！"
+    },
+    {
+      "video_id": "BV195mkBfEam",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "财经商业",
+      "form": "资讯播报",
+      "title": "第1观察 丨2026年消费市场关键词：情绪"
+    },
+    {
+      "video_id": "BV19BHg6kEFD",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "文娱热点",
+      "form": "混剪合集",
+      "title": "笑死！仅差一天的中韩红毯差别好大…"
+    },
+    {
+      "video_id": "BV1RYxg6DETb",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "科技数码",
+      "form": "观点评论",
+      "title": "华为突然敢“亮芯”了，到底是真突破，还是大营销？"
+    },
+    {
+      "video_id": "BV1Sant6mEXY",
+      "task_id": null,
+      "domain_1": "资讯",
+      "domain_2": "科技数码",
+      "form": "讲解分享",
+      "title": "红米turbo6max来了"
+    },
+    {
+      "video_id": "BV1WyHV6KEui",
+      "task_id": null,
+      "domain_1": "时尚美妆",
+      "domain_2": "穿搭",
+      "form": "观点评论",
+      "title": "过度女性化的单品，你会驾驭它，穿搭它吗？"
+    },
+    {
+      "video_id": "BV1WQn36fEDm",
+      "task_id": null,
+      "domain_1": "时尚美妆",
+      "domain_2": "发型",
+      "form": "教程演示",
+      "title": "「日常发型」——垂耳兔公主卷｜手残党发型教程"
+    },
+    {
+      "video_id": "BV1tBHV6gE6s",
+      "task_id": null,
+      "domain_1": "时尚美妆",
+      "domain_2": "美妆教程",
+      "form": "教程演示",
+      "title": "GRWM｜10min早八伪素颜🫧无粉感有效淡妆⏰"
+    },
+    {
+      "video_id": "BV1DQH56JEPr",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "饮食文化",
+      "form": "讲解分享",
+      "title": "四川其实吃得很清淡，比如以这耙耙菜为证"
+    },
+    {
+      "video_id": "BV1qpxM6SEu8",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "制作姜红糖，纯手工熬制，还原小时候的味道，老工艺慢火熬煮，如今这样传统做法，现在很少人能吃到了。#制作姜红糖"
+    },
+    {
+      "video_id": "BV1LmsZ6XEyY",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "现场记录",
+      "title": "四川遂宁街边6元一碗五谷凉粉#地方特色美食谁懂这一口 #街边小吃 #地方宝藏美食 #美食分享"
+    },
+    {
+      "video_id": "BV1Jisd6pE7H",
+      "task_id": null,
+      "domain_1": "生活记录",
+      "domain_2": "日常vlog",
+      "form": "讲解分享",
+      "title": "山东俩侄女想辞职跟洞洞做短视频，洞洞直接拒绝希望能踏踏实实上班然后兼职干#家庭日常"
+    },
+    {
+      "video_id": "BV1Ursf61Ew3",
+      "task_id": null,
+      "domain_1": "生活记录",
+      "domain_2": "手工制作",
+      "form": "成果展示",
+      "title": "姥姥手工缝制的小裙子，穿到迪士尼不会奇怪吧？"
+    },
+    {
+      "video_id": "BV1hGHA67ETB",
+      "task_id": null,
+      "domain_1": "健康运动",
+      "domain_2": "健身训练",
+      "form": "教程演示",
+      "title": "居家跟练｜核心UP"
+    },
+    {
+      "video_id": "BV1WaHN6GEE1",
+      "task_id": null,
+      "domain_1": "健康运动",
+      "domain_2": "运动技能",
+      "form": "讲解分享",
+      "title": "【跑步科普】步频一定要180吗？同一双腿，我的步频从175到196，180只是一次现场观察，不是标准答案"
+    },
+    {
+      "video_id": "BV1oQxV6NEMS",
+      "task_id": null,
+      "domain_1": "知识科普",
+      "domain_2": "自然科学",
+      "form": "讲解分享",
+      "title": "这条弯成S形的线，竟然是地球上最长的直线。#地理 #地图 #有趣的知识又增长了 #涨知识"
+    }
+  ]
+}

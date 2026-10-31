@@ -232,6 +232,72 @@ class WiringTests(unittest.TestCase):
         used = [cid for t in (state.get("memory_trace") or []) for cid in (t.get("used_case_ids") or [])]
         self.assertIn("c-rv", used, f"案例没有被检索到，memory_trace={state.get('memory_trace')}")
 
+    def test_case_bank_is_shared_across_task_dbs(self):
+        """独立案例库：一个实验目录里判定出的案例，应能被另一个实验目录的检索命中。"""
+        with tempfile.TemporaryDirectory() as td:
+            bank = Path(td) / "casebank.db"
+            a = Storage(Path(td) / "a" / "agent.db", case_bank_path=bank)
+            b = Storage(Path(td) / "b" / "agent.db", case_bank_path=bank)
+            self.assertIsNot(a.case_conn, a.conn)
+            self.assertIsNot(b.case_conn, b.conn)
+            MemoryStore(a.case_conn).create_draft(CaseRecord(
+                case_id="bank-1", case_type="expression", problem_type="表达",
+                bad_example="FT称普京通话讲斯拉夫史 挪威首相否认",
+                good_example="挪威首相驳斥《金融时报》涉普京通话报道",
+                applicability="缩写未展开，读者不认识 FT", source_task_id="t-a",
+                rule_version="red-dot-v0.2-modular", confirmed=True,
+                case_status="confirmed", scope="资讯 时事社会 资讯播报",
+            ))
+            hits = MemoryStore(b.case_conn).search(
+                "FT称普京通话讲斯拉夫史 挪威首相否认", ["表达"],
+                "red-dot-v0.2-modular", 3, ["资讯", "时事社会", "资讯播报"],
+            )
+            self.assertTrue(hits, "独立案例库里的案例应能被另一个任务库检索到")
+            self.assertEqual(hits[0]["case_id"], "bank-1")
+
+    def test_auto_case_normalizes_problem_type(self):
+        """自动沉淀的案例要把英文 reason_type 归一成检索用的中文问题类型。"""
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        cand = state["candidates"][0]
+        self.storage.record_human_decision(task_id, {
+            "candidate_id": cand["candidate_id"], "decision": "rejected",
+            "reason": "主体写反了", "reason_type": "fact",
+        })
+        cases = [json.loads(r[0]) for r in self.storage.conn.execute("SELECT payload FROM cases")]
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0]["problem_type"], "事实与信源")
+        self.assertEqual(cases[0]["raw_reason_type"], "fact")
+
+    def test_approved_without_edit_creates_positive_case(self):
+        """判可用 = 原样通过，本身就是一条正例（good=原标题，bad 空）。"""
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        cand = state["candidates"][0]
+        self.storage.record_human_decision(task_id, {"candidate_id": cand["candidate_id"], "decision": "approved"})
+        cases = [json.loads(r[0]) for r in self.storage.conn.execute("SELECT payload FROM cases")]
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0]["polarity"], "positive")
+        self.assertEqual(cases[0]["good_example"], cand["headline"])
+        self.assertEqual(cases[0]["bad_example"], "")
+
+    def test_marginal_with_edit_creates_bad_good_pair(self):
+        """勉强通过通常会改标题：原标题=反例，改后=正例，落同一条案例。"""
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        cand = state["candidates"][0]
+        self.storage.record_human_decision(task_id, {
+            "candidate_id": cand["candidate_id"], "decision": "marginal",
+            "reason": "FT 是缩写", "final_headline": "改好的标题",
+        })
+        cases = [json.loads(r[0]) for r in self.storage.conn.execute("SELECT payload FROM cases")]
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0]["bad_example"], cand["headline"])
+        self.assertEqual(cases[0]["good_example"], "改好的标题")
+
     def test_marginal_without_edit_becomes_negative_case(self):
         pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
         task_id = pipeline.run("BV1Ltsf6xEpV")

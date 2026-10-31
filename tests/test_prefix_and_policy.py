@@ -440,3 +440,82 @@ class NarrativeRiskTests(unittest.TestCase):
         from agent_system.pipeline import _narrative_risk
         risk = _narrative_risk(self._video(["康平县一中学筛查肺结核时多名学生共用一个针头"]), {"applicable": True, "claim_total": 3, "flagged": 0})
         self.assertEqual(risk["level"], "none")
+
+
+class StructuralCandidateTests(unittest.TestCase):
+    """结构断言：事件之间的关系可以当主看点，评价性判断不行。
+
+    事实断言要 grounded（某条 claim 直接支撑），结构断言天然是推断——
+    "她迟到反被关心"不可能有原话。用事实标准卡它，最有价值的看点会被全部筛掉。
+    """
+
+    def _build(self, units, turns):
+        from agent_system.types import BoundarySet, Claim, ClaimDecision, EventNode, EventTurn, SemanticUnit, UnitDecision, Understanding
+        claims = [Claim("c1", "她说要定十个闹钟", "observable", ["e-title"]),
+                  Claim("c2", "一方问对方吃饭没", "observable", ["e-asr-0014"])]
+        events = [EventNode("ev-1", "女生", "睡过头迟到", "前情", ["e-title"]),
+                  EventNode("ev-2", "一方", "问对方吃饭没", "现场", ["e-asr-0014"])]
+        understanding = Understanding("剧情短片", [], claims, [], [], [], units, events,
+                                      [EventTurn(t["f"], t["t"], t["type"], t.get("note", "")) for t in turns])
+        boundary = BoundarySet(
+            decisions=[ClaimDecision("c1", "x", "usable", ["e-title"], [], [], [], ""),
+                       ClaimDecision("c2", "x", "usable", ["e-asr-0014"], [], [], [], "")],
+            unit_decisions=[UnitDecision(u.unit_id, "limited") for u in units],
+        )
+        return understanding, boundary
+
+    def test_contrast_turn_becomes_candidate(self):
+        from agent_system.pipeline import _structural_candidates
+        from agent_system.types import SemanticUnit
+        u, b = self._build([SemanticUnit("su-1", "意思", ["c1", "c2"], ["e-title", "e-asr-0014"], role_in_video="主旨")],
+                           [{"f": "ev-1", "t": "ev-2", "type": "contrast", "note": "她迟到反被关心"}])
+        out = _structural_candidates(u, b)
+        self.assertTrue(any(x["kind"] == "turn" and x["relation"] == "contrast" for x in out))
+
+    def test_main_axis_needs_two_events(self):
+        from agent_system.pipeline import _structural_candidates
+        from agent_system.types import SemanticUnit
+        # 覆盖两个事件的主旨 → 可作主轴
+        u, b = self._build([SemanticUnit("su-1", "她迟到但被关心", ["c1", "c2"], ["e-title", "e-asr-0014"], role_in_video="主旨")], [])
+        self.assertTrue(any(x["kind"] == "main_axis" for x in _structural_candidates(u, b)))
+        # 只覆盖一个事件的主旨（通常是一句评价）→ 不入选
+        u2, b2 = self._build([SemanticUnit("su-2", "这份通报在替学校开脱", ["c1"], ["e-title"], role_in_video="主旨")], [])
+        self.assertFalse(any(x["kind"] == "main_axis" for x in _structural_candidates(u2, b2)))
+
+    def test_evaluation_judgment_never_enters(self):
+        """评价性判断没有事件端点，天然不该出现；这条测试锁住这个行为。"""
+        from agent_system.pipeline import _structural_candidates
+        from agent_system.types import SemanticUnit
+        u, b = self._build([SemanticUnit("su-3", "作者有意误导观众", ["c1"], ["e-title"], role_in_video="主旨")],
+                           [{"f": "ev-1", "t": "ev-1", "type": "contrast"}])
+        out = _structural_candidates(u, b)
+        self.assertFalse(any("误导" in x["value"] for x in out))
+
+    def test_meta_event_cannot_be_turn_endpoint(self):
+        """「标题承诺 X，实际是 Y」不是事件，不能当反差端点。
+
+        BV12HxE6cEQ5 的换装视频里，模型把"标题承诺深度交流科学知识"当成事件，
+        于是"标题党"被写成了剧情反差。事件端点必须来自真实发生的事。
+        """
+        from agent_system.pipeline import _structural_candidates
+        from agent_system.types import BoundarySet, Claim, ClaimDecision, EventNode, EventTurn, Understanding
+        claims = [Claim("c1", "标题承诺深度交流", "observable", ["e-title"]),
+                  Claim("c2", "画面是换装摆拍", "observable", ["e-description"])]
+        events = [EventNode("ev-1", "作者", "标题承诺深度交流科学知识", "前情", ["e-title"]),
+                  EventNode("ev-2", "女生", "换装摆拍展示外形", "现场", ["e-description"])]
+        understanding = Understanding("表演展示", [], claims, [], [], [], [], events,
+                                      [EventTurn("ev-1", "ev-2", "contrast", "标题与内容不一致")])
+        boundary = BoundarySet(decisions=[ClaimDecision("c1", "x", "usable", ["e-title"], [], [], [], ""),
+                                          ClaimDecision("c2", "x", "usable", ["e-description"], [], [], [], "")])
+        out = _structural_candidates(understanding, boundary)
+        self.assertFalse([x for x in out if x["kind"] == "turn"], "标题承诺不能当反差端点")
+
+    def test_same_event_pair_cannot_form_turn(self):
+        from agent_system.pipeline import _structural_candidates
+        from agent_system.types import BoundarySet, Claim, ClaimDecision, EventNode, EventTurn, Understanding
+        claims = [Claim("c1", "起跳投篮", "observable", ["e-asr-0001"])]
+        events = [EventNode("ev-1", "一方", "起跳投篮", "现场", ["e-asr-0001"])]
+        understanding = Understanding("现场记录", [], claims, [], [], [], [], events,
+                                      [EventTurn("ev-1", "ev-1", "contrast", "攻防对抗")])
+        boundary = BoundarySet(decisions=[ClaimDecision("c1", "x", "usable", ["e-asr-0001"], [], [], [], "")])
+        self.assertFalse([x for x in _structural_candidates(understanding, boundary) if x["kind"] == "turn"])

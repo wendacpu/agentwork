@@ -13,8 +13,38 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 调试台的英文 reason_type / issue_code → 检索用的中文问题类型。
+# 不统一口径时，首轮检索的 problem_types（["表达", "事实与信源"]）永远对不上案例的 problem_type。
+_REASON_TO_PROBLEM_TYPE = {
+    "fact": "事实与信源",
+    "context": "事实与信源",
+    "point": "表达",
+    "grammar": "表达",
+    "unclear": "表达",
+    "other": "表达",
+}
+
+
+def _canonical_problem_type(raw_reason: str, issue_codes: list[str]) -> str:
+    raw = (raw_reason or "").strip()
+    if raw in _REASON_TO_PROBLEM_TYPE:
+        return _REASON_TO_PROBLEM_TYPE[raw]
+    for code in [raw, *issue_codes]:
+        text = str(code or "")
+        if not text:
+            continue
+        low = text.lower()
+        if text.startswith("expression") or text.startswith("G3") or "expression" in low:
+            return "表达"
+        if text.startswith("G1") or "source" in low or "fact" in low:
+            return "事实与信源"
+        if text.startswith("G2") or "policy" in low:
+            return "政策"
+    return raw or "root_cause_unresolved"
+
+
 class Storage:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, case_bank_path: str | Path | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = str(path)
         self.conn = sqlite3.connect(path, timeout=30)
@@ -31,6 +61,17 @@ class Storage:
         CREATE TABLE IF NOT EXISTS labels(id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, payload_json TEXT);
         """)
         self.conn.commit()
+        # 案例库：默认与任务库同库（向后兼容）；配 case_bank 时用独立库，让案例跨实验目录共享。
+        if case_bank_path and str(Path(case_bank_path).resolve()) != str(Path(path).resolve()):
+            Path(case_bank_path).parent.mkdir(parents=True, exist_ok=True)
+            self.case_conn = sqlite3.connect(case_bank_path, timeout=30)
+            self.case_conn.row_factory = sqlite3.Row
+            self.case_conn.execute("PRAGMA journal_mode=WAL")
+            self.case_conn.execute("PRAGMA busy_timeout=30000")
+            self.case_conn.execute("CREATE TABLE IF NOT EXISTS cases(case_id TEXT PRIMARY KEY, payload TEXT, confirmed INTEGER, rule_version TEXT)")
+            self.case_conn.commit()
+        else:
+            self.case_conn = self.conn
 
     def create_task(self, video_id: str, config: dict[str, Any]) -> str:
         task_id = f"task-{uuid.uuid4().hex[:12]}"
@@ -107,7 +148,7 @@ class Storage:
                 self.conn.execute("DELETE FROM human_decisions WHERE id=?", (prior[0],))
             self.conn.execute("DELETE FROM labels WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=?", (task_id, candidate_id))
             self.conn.execute("DELETE FROM events WHERE task_id=? AND node='H01' AND event_type='human_decision' AND json_extract(payload_json,'$.decision.candidate_id')=?", (task_id, candidate_id))
-            self.conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{candidate_id}",))
+            self.case_conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{candidate_id}",))
             state["human_decisions"] = [x for x in state.get("human_decisions", []) if x.get("candidate_id") != candidate_id]
             if state.get("human_decision", {}).get("candidate_id") == candidate_id:
                 state.pop("human_decision", None)
@@ -165,7 +206,7 @@ class Storage:
             prior = self.conn.execute("SELECT id FROM human_decisions WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=? ORDER BY id DESC LIMIT 1", (task_id, decision["candidate_id"])).fetchone()
             if prior:
                 self.conn.execute("UPDATE human_decisions SET payload_json=? WHERE id=?", (json.dumps(decision, ensure_ascii=False), prior[0]))
-                self.conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{decision['candidate_id']}",))
+                self.case_conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{decision['candidate_id']}",))
                 self.conn.execute("DELETE FROM labels WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=?", (task_id, decision["candidate_id"]))
                 self.conn.execute("DELETE FROM events WHERE task_id=? AND node='H01' AND event_type='human_decision' AND json_extract(payload_json,'$.decision.candidate_id')=?", (task_id, decision["candidate_id"]))
             else:
@@ -213,17 +254,24 @@ class Storage:
         final = str(decision.get("final_headline") or "")
         status = str(decision.get("decision") or "")
         polarity = "positive"
-        if status in {"approved", "marginal"}:
+        confirmed = True
+        bad_example, good_example = "", ""
+        if status == "approved":
+            # 判可用 = 原样通过，本身就是一条正例：good=原标题
+            # （万一走了「编辑后通过」，把原标题也记成反例，避免丢掉修正信息）
             if final and final != original:
-                good, confirmed, case_type = final, True, "expression"
-            elif status == "marginal":
-                # 能用但有问题、且没改标题：沉淀成反例，让下次生成知道"这类表达勉强通过"
-                good, confirmed, case_type, polarity = "", True, "expression", "negative"
+                bad_example, good_example = original, final
             else:
-                return None
+                good_example = original
+        elif status == "marginal":
+            # 勉强通过：原标题是反例、改后是正例（正常流程都会改标题）
+            if final and final != original:
+                bad_example, good_example = original, final
+            else:
+                bad_example, polarity = original, "negative"
         elif status == "rejected":
-            # 驳回且没给改写建议：至少留下"这么写不行"的反例
-            good, confirmed, case_type, polarity = "", True, "expression", "negative"
+            # 驳回 = 反例
+            bad_example, polarity = original, "negative"
         else:
             return None
         rule_version = str((state.get("rules") or {}).get("version") or "temporary-v1")
@@ -231,20 +279,23 @@ class Storage:
         domain = video.get("domain") or {}
         scope = " ".join(str(x) for x in [domain.get("一级"), domain.get("二级"), video.get("format")] if x)
         issues = next((r.get("issues", []) for r in (state.get("reviews") or []) if r.get("candidate_id") == candidate.get("candidate_id")), [])
-        problem_type = str(decision.get("reason_type") or (issues[0].get("issue_code") if issues else "root_cause_unresolved"))
+        raw_reason = str(decision.get("reason_type") or "")
+        issue_codes = [str(i.get("issue_code")) for i in issues if i.get("issue_code")]
+        problem_type = _canonical_problem_type(raw_reason, issue_codes)
         case = CaseRecord(
-            case_id=f"auto-{task_id}-{candidate.get('candidate_id')}", case_type=case_type,
-            problem_type=problem_type, bad_example=original, good_example=good,
+            case_id=f"auto-{task_id}-{candidate.get('candidate_id')}", case_type="expression",
+            problem_type=problem_type, bad_example=bad_example, good_example=good_example,
             applicability=str(decision.get("reason") or decision.get("upstream_field") or ""),
             source_task_id=task_id, rule_version=rule_version, confirmed=confirmed,
             compatible_rule_versions=[rule_version], case_status="confirmed" if confirmed else "draft",
             scope=scope, source_evidence=list(candidate.get("evidence_ids") or []),
         )
         payload = asdict(case)
+        payload["raw_reason_type"] = raw_reason
         payload["trigger_issue_codes"] = [str(i.get("issue_code")) for i in issues if i.get("issue_code")]
         payload["polarity"] = polarity
         payload["confirmed"] = confirmed
         payload["case_status"] = "confirmed" if confirmed else "draft"
-        self.conn.execute("INSERT OR REPLACE INTO cases(case_id,payload,confirmed,rule_version) VALUES(?,?,?,?)", (case.case_id, json.dumps(payload, ensure_ascii=False), int(confirmed), rule_version))
+        self.case_conn.execute("INSERT OR REPLACE INTO cases(case_id,payload,confirmed,rule_version) VALUES(?,?,?,?)", (case.case_id, json.dumps(payload, ensure_ascii=False), int(confirmed), rule_version))
         return case.case_id
 

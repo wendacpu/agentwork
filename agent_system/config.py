@@ -31,6 +31,8 @@ class RunConfig:
     review_model: str = "mock"
     asset_root: str = "/Users/wanting/program/新项目/复杂agent/recent-portrait-100"
     output_dir: str = "runtime"
+    # 独立案例库路径；空 = 与任务库同库（旧行为）。配置后案例跨实验目录共享。
+    case_bank: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
     # 外部实时核查配置（P2）：哪些品类核查、refuted 阈值、单视频核查条数上限
     verification_enabled: bool = False

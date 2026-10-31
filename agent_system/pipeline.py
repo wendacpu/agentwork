@@ -18,7 +18,7 @@ from .rules import load_common_rule_ids, load_rule_bundle, load_rules, rubric
 from .prompts import prompt_for
 from .schemas import GATE_IDS, QUALITY_IDS, validate_review
 from .storage import Storage
-from .types import BoundarySet, Claim, Highlight, SemanticUnit, Understanding, UnitDecision, to_dict
+from .types import BoundarySet, Claim, EventNode, EventTurn, Highlight, SemanticUnit, Understanding, UnitDecision, to_dict
 from .prompts import VERIFY_PROMPT
 from .verification import create_search_provider
 from .verification.judge import compute_risk, parse_verification
@@ -205,6 +205,7 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
             temporal_status=_temporal_status(item.get("temporal_status")),
             assertion_permission=_legacy_assertion_permission(item.get("assertion_permission") or item.get("assertion_judgment") or item.get("assertion_decision")),
             entities=_record_list(item.get("entities"), string_key="name"),
+            verification_query=str(item.get("verification_query") or item.get("verify_query") or item.get("search_query") or "").strip(),
         ))
     attrs = raw.get("attributes", [])
     if isinstance(attrs, dict):
@@ -250,6 +251,46 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
             grounding=grounding,
             corroboration=item.get("corroboration") if isinstance(item.get("corroboration"), dict) else {},
         ))
+    # 事件时间线：和 semantic_units 一样要能在 Understanding 包装里找到。
+    # 模型这次就把 events/turns 放进了内层，只读顶层会以为它没输出。
+    events_raw = raw.get("events") or raw.get("event_timeline") or []
+    turns_raw = raw.get("turns") or raw.get("event_turns") or []
+    for wrapper in ("Understanding", "understanding", "result", "output", "data"):
+        inner = raw.get(wrapper)
+        if not isinstance(inner, dict):
+            continue
+        if not isinstance(events_raw, list) or not events_raw:
+            events_raw = inner.get("events") or inner.get("event_timeline") or []
+        if not isinstance(turns_raw, list) or not turns_raw:
+            turns_raw = inner.get("turns") or inner.get("event_turns") or []
+    events: list[EventNode] = []
+    for i, item in enumerate(events_raw if isinstance(events_raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        events.append(EventNode(
+            event_id=str(item.get("event_id") or f"e{i+1}"),
+            actor=str(item.get("actor") or item.get("who") or ""),
+            action=str(item.get("action") or item.get("what") or item.get("text") or ""),
+            when=str(item.get("when") or item.get("stage") or "现场"),
+            evidence_ids=[str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])],
+            confidence=str(item.get("confidence") or item.get("grounding") or "inferred"),
+        ))
+    turns: list[EventTurn] = []
+    for i, item in enumerate(turns_raw if isinstance(turns_raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        turn_type = str(item.get("type") or "sequence")
+        expectation = str(item.get("expectation") or item.get("expected") or "").strip()
+        # 说不出「按常理本该发生什么」的，不算反差：那是顺承，不是预期违背
+        if turn_type == "contrast" and not expectation:
+            turn_type = "sequence"
+        turns.append(EventTurn(
+            from_event=str(item.get("from_event") or item.get("from") or ""),
+            to_event=str(item.get("to_event") or item.get("to") or ""),
+            type=turn_type,
+            note=str(item.get("note") or ""),
+            expectation=expectation,
+        ))
     # 降级：模型未输出语义单元时，每条原子 claim 包成一个单元，保持旧链路行为
     if not semantic_units:
         for i, c in enumerate(claims):
@@ -263,6 +304,8 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
         extracted_sources=raw.get("extracted_sources", []) if isinstance(raw.get("extracted_sources", []), list) else [],
         conflicts=raw.get("conflicts", []) if isinstance(raw.get("conflicts", []), list) else [],
         semantic_units=semantic_units,
+        events=events,
+        turns=turns,
     )
 
 
@@ -295,6 +338,140 @@ def _primary_evidence_audit(understanding: Understanding, video: Any) -> dict[st
         }
     return {"applicable": True, "claims": flagged, "claim_total": len(understanding.claims), "flagged": len(flagged),
             "text_primary_count": len(text_primary), "source_count": len(source_primary)}
+
+
+GENDERED_ACTORS = ("女生", "男生", "女孩", "男孩", "女子", "男子", "她", "他", "学姐", "学妹", "学长", "学弟", "闺蜜")
+
+
+def _sanitize_event_actors(events: list[EventNode], video: Any) -> int:
+    """没有一手文本证据的事件，不许指定人物性别。
+
+    画面看不出是谁在说话，也看不出"女生递给男生"里的女生是谁。description 里写死的
+    「女生抱花束递给窗内男生」会变成模型判断台词归属的先验，从而把整段对话的方向对调
+    （BV1PwsR6oEKW 连续两次都把"男生送吃的"写成"女生送吃的"）。这里把没有 ASR/OCR/原题
+    支撑的事件主语降级为"一方"，避免一个未核验的描述决定整条视频的人物关系。
+    """
+    quality = {e.evidence_id: (e.quality or "") for e in video.evidence}
+    changed = 0
+    for event in events:
+        qualities = {quality.get(x, "") for x in event.evidence_ids}
+        if qualities & (TEXT_PRIMARY_QUALITIES | {"source"}):
+            continue
+        if any(word in event.actor for word in GENDERED_ACTORS):
+            event.actor = "一方"
+            event.confidence = "speculative"
+            changed += 1
+    return changed
+
+
+# 只有「事件之间的关系」算结构断言。评价性判断（这份通报在替谁开脱、这是营销话术、
+# 作者有意误导）不对应任何事件，不在此列——那是立场，不是主干。
+NARRATIVE_TURN_TYPES = {"contrast", "turn", "causal"}
+
+# 「标题说 X，实际是 Y」不是事件，是元陈述。它把"标题承诺"当成事件端点，
+# 于是"标题党"被误读成剧情反差（BV12HxE6cEQ5 把换装摆拍写成了 contrast）。
+META_EVENT_WORDS = ("标题", "字幕", "文案", "封面", "描述", "配文", "承诺", "打出", "写着")
+
+
+def _is_meta_event(event: EventNode) -> bool:
+    return any(word in (event.action or "") for word in META_EVENT_WORDS)
+
+
+# 「她说要交流科学知识，实际在换装」不是叙事反差，是言行不一——那是揭穿/评价，
+# 不是"处境与预期相反"。叙事反差的一端必须是发生的事（迟到、赢球、下雨），
+# 不能是言语行为本身。
+SPEECH_ACT_WORDS = ("说", "喊", "宣称", "表示", "强调", "介绍", "邀请", "承诺", "声明", "回应", "吐槽", "夸")
+
+
+def _is_speech_event(event: EventNode) -> bool:
+    head = (event.action or "")[:8]
+    return any(word in head for word in SPEECH_ACT_WORDS)
+
+
+def _structural_candidates(understanding: Understanding, boundary: BoundarySet) -> list[dict[str, Any]]:
+    """把「事件之间的关系」变成可用的看点候选。
+
+    结构断言的判定标准和事实断言不同：事实断言要 grounded（某条 claim 直接支撑），
+    而"她迟到反被关心"这种结构**不可能有原话**——它是跨事件归纳出来的。只要两端事件
+    各自有证据，这个结构就成立，可以当主看点，表达时标不确定性。
+
+    两类来源：
+    1) turns 里的反差/转折/因果——事件之间的叙事关系；
+    2) 覆盖了至少两个事件的主旨单元——主轴（视频整体在讲什么事）。
+
+    评价性判断（"在替学校开脱"）不含事件端点，因此天然不会出现在这里。
+    """
+    allowed = {d.claim_id for d in boundary.decisions if d.decision != "excluded" and not d.verification_required}
+    events = {e.event_id: e for e in understanding.events}
+    evidence_to_claims: dict[str, list[str]] = {}
+    for claim in understanding.claims:
+        for eid in claim.evidence_refs:
+            evidence_to_claims.setdefault(eid, []).append(claim.claim_id)
+
+    def claims_for(evidence_ids: list[str]) -> list[str]:
+        found: list[str] = []
+        for eid in evidence_ids:
+            for cid in evidence_to_claims.get(eid, []):
+                if cid in allowed and cid not in found:
+                    found.append(cid)
+        return found
+
+    out: list[dict[str, Any]] = []
+    for i, turn in enumerate(understanding.turns):
+        if turn.type not in NARRATIVE_TURN_TYPES:
+            continue
+        before, after = events.get(turn.from_event), events.get(turn.to_event)
+        if not before or not after or not before.evidence_ids or not after.evidence_ids:
+            continue
+        # 端点必须是两件真实发生的事：不能是同一个事件的两面，也不能是"标题/描述说了什么"
+        if turn.from_event == turn.to_event or _is_meta_event(before) or _is_meta_event(after):
+            continue
+        # 言语行为不能当反差端点的「前件」：说 vs 做 是言行不一，不是处境反差
+        if _is_speech_event(before):
+            continue
+        claim_ids = claims_for([*before.evidence_ids, *after.evidence_ids])
+        if not claim_ids:
+            continue
+        out.append({
+            "kind": "turn",
+            "struct_id": f"turn-{i + 1}",
+            "relation": turn.type,
+            "expectation": turn.expectation,
+            "value": turn.note or f"{before.actor}{before.action}，但{after.actor}{after.action}",
+            "before": {"actor": before.actor, "action": before.action, "when": before.when},
+            "after": {"actor": after.actor, "action": after.action, "when": after.when},
+            "claim_ids": claim_ids,
+            "evidence_ids": list(dict.fromkeys([*before.evidence_ids, *after.evidence_ids])),
+            "certainty": "inferred",
+            "note": "事件之间的关系，可作主看点；写标题时用「反被/却」这类结构，方向不确定时用「一方/对方」",
+        })
+
+    # 主轴：主旨单元如果覆盖了两个以上事件，它讲的就是"发生了什么事"，可作主看点。
+    # 只覆盖单个事件的主旨（常常是一句评价）不在此列。
+    for unit in understanding.semantic_units:
+        if (unit.role_in_video or "") != "主旨":
+            continue
+        covered = [e for e in understanding.events if set(e.evidence_ids) & set(unit.evidence_ids)]
+        if len(covered) < 2:
+            continue
+        claim_ids = claims_for(list(unit.evidence_ids))
+        if not claim_ids:
+            continue
+        # 主轴的值由事件拼出来，不用单元原话：单元 meaning 常带「标题说…」这类元陈述，
+        # 直接拿来会生成"标题说交流科学知识，画面却是换装摆拍"这种标题党式的怪标题。
+        axis_value = "、".join(f"{e.actor}{e.action}" for e in covered[:3])
+        out.append({
+            "kind": "main_axis",
+            "struct_id": f"axis-{unit.unit_id}",
+            "relation": "main_axis",
+            "value": axis_value or unit.meaning,
+            "events": [{"actor": e.actor, "action": e.action, "when": e.when} for e in covered[:4]],
+            "claim_ids": claim_ids,
+            "evidence_ids": list(dict.fromkeys(unit.evidence_ids)),
+            "certainty": "inferred",
+            "note": "覆盖多个事件的主轴，可作主看点；表达时保留不确定性，不要写成确定事实",
+        })
+    return out
 
 
 DIALOGUE_MIN_SEGMENTS = 12      # 少于这个数，不像多轮对话
@@ -544,7 +721,7 @@ def _normalize_highlights(raw: dict[str, Any], allowed_claim_ids: set[str], fall
         if not claim_ids or not value:
             continue
         hook_type = str(item.get("hook_type") or item.get("hook") or "")
-        if hook_type not in {"information", "suspense", "identity", "conflict", "emotion"}:
+        if hook_type not in {"information", "suspense", "identity", "conflict", "emotion", "contrast"}:
             hook_type = ""
         result.append(Highlight(
             highlight_id=str(item.get("highlight_id") or f"h{i+1}"), claim_ids=claim_ids,
@@ -764,7 +941,7 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
 class Pipeline:
     def __init__(self, dataset: Dataset, storage: Storage, adapter: ModelAdapter, config: RunConfig, review_adapter: ModelAdapter | None = None, search_provider=None) -> None:
         self.dataset, self.storage, self.adapter, self.review_adapter, self.config = dataset, storage, adapter, review_adapter or adapter, config
-        self.memory = MemoryStore(storage.conn)
+        self.memory = MemoryStore(storage.case_conn)
         self.search_provider = search_provider
 
     def _verify_understanding(self, task_id: str, video: Any, understanding: Understanding, state: dict[str, Any]) -> dict[str, Any] | None:
@@ -959,6 +1136,9 @@ class Pipeline:
             # 一手材料使用率：claim 是否引用了 quality=source 的证据（诊断 D1 的可观测化）
             claims_using_source = [c.claim_id for c in understanding.claims if source_evidence_ids and set(c.evidence_refs) & set(source_evidence_ids)]
             state["source_evidence_usage"] = {"source_evidence_ids": source_evidence_ids, "claims_using_source": claims_using_source, "covered": bool(claims_using_source), "claim_total": len(understanding.claims)}
+            sanitized = _sanitize_event_actors(understanding.events, video)
+            if sanitized:
+                self.storage.event(task_id, "N03", "event_actor_neutralized", {"count": sanitized, "reason": "事件缺一手文本证据，主语降级为「一方」"})
             primary_audit = _primary_evidence_audit(understanding, video)
             state["primary_evidence_audit"] = primary_audit
             state["narrative_risk"] = _narrative_risk(video, primary_audit)
@@ -1010,17 +1190,52 @@ class Pipeline:
                 pending = [x.claim_id for x in boundary.decisions if x.verification_required]
                 state["verification_tasks"] = [to_dict(x) for x in boundary.decisions if x.verification_required]
                 return self._stop(task_id, state, "PENDING_VERIFICATION" if pending else "NO_USABLE_CLAIM")
+            structures = _structural_candidates(understanding, boundary)
+            if structures:
+                state["structural_candidates"] = structures
+                self.storage.event(task_id, "N05", "structural_candidates", {"count": len(structures), "items": [c["struct_id"] for c in structures]})
+                # 结构断言以「语义单元」的身份进入看点选择：N07 只在单元里挑，光把它当背景信息
+                # 放在旁边，模型会继续选那些能过 boundary 的边角单元（BV1PwsR6oEKW 退回台词摘录）。
+                for item in structures:
+                    uid = item["struct_id"]
+                    if any(u.unit_id == uid for u in understanding.semantic_units):
+                        continue
+                    understanding.semantic_units.append(SemanticUnit(
+                        unit_id=uid, meaning=item["value"], claim_ids=item["claim_ids"],
+                        evidence_ids=item["evidence_ids"],
+                        kind="thesis" if item["kind"] == "main_axis" else "turn",
+                        role_in_video="主旨" if item["kind"] == "main_axis" else "主线支撑",
+                        grounding="inferred",
+                        corroboration={"status": "consistent", "evidence_ids": item["evidence_ids"], "notes": "结构断言：两端事件均有证据"},
+                    ))
+                    boundary.unit_decisions.append(UnitDecision(
+                        unit_id=uid, decision="limited",
+                        required_limits=["结构是推断，表达时保留不确定性；人物方向不确定时用「一方/对方」"],
+                        reason="结构断言（程序合成）：两端事件均有证据，可作主看点",
+                    ))
             fallback_highlights = [Highlight(f"h{i+1}", [d.claim_id], d.supported_statement or "", "由可用陈述覆盖", d.evidence_refs, "main" if i == 0 else "backup", d.supported_statement or "") for i, d in enumerate(allowed[:3])]
             highlight_raw = self._call(task_id, "N07", "highlight", {
                 "video": to_dict(video), "claims": to_dict(understanding.claims),
                 "semantic_units": to_dict(understanding.semantic_units),
                 "unit_decisions": to_dict(boundary.unit_decisions),
+                "events": to_dict(understanding.events),
+                "turns": to_dict(understanding.turns),
+                "structural_candidates": structures,
                 "boundary": to_dict(boundary), "matched_rules": rule_bundle.as_context(),
             }, "HighlightSet")
             if bool(highlight_raw.get("abandon") or highlight_raw.get("no_viable_highlight")):
-                state["highlight_selection"] = {"abandoned": True, "reason": str(highlight_raw.get("reason") or ""), "eliminated": highlight_raw.get("eliminated", [])}
-                return self._stop(task_id, state, "NO_VIABLE_HIGHLIGHT")
-            highlights = _normalize_highlights(highlight_raw, {d.claim_id for d in allowed}, fallback_highlights)
+                if not structures:
+                    state["highlight_selection"] = {"abandoned": True, "reason": str(highlight_raw.get("reason") or ""), "eliminated": highlight_raw.get("eliminated", [])}
+                    return self._stop(task_id, state, "NO_VIABLE_HIGHLIGHT")
+                # 模型看单元全被 excluded 就放弃了，但结构断言本身两端有证据：它比"没有看点"更该被写出来
+                top = structures[0]
+                hook = "contrast" if top.get("relation") == "contrast" else ("suspense" if top.get("relation") == "turn" else "information")
+                highlights = [Highlight("h1", top["claim_ids"], top["value"], "结构断言：两端事件均有证据", top["evidence_ids"], "main", top["value"], unit_id=top["struct_id"], hook_type=hook)]
+                highlights[0].selection_reason = f"程序兜底：{top['kind']} {top['struct_id']}（{top.get('relation')}）"
+                state["structural_fallback"] = {"struct_id": top["struct_id"], "kind": top["kind"], "reason": "no_viable_highlight_from_model"}
+                self.storage.event(task_id, "N07", "structural_fallback", state["structural_fallback"])
+            else:
+                highlights = _normalize_highlights(highlight_raw, {d.claim_id for d in allowed}, fallback_highlights)
             # 模型未在 highlight 上给 unit_id 时，用其 claim_ids 反查所属语义单元补齐
             claim_to_unit: dict[str, str] = {}
             for u in understanding.semantic_units:

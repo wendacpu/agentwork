@@ -7,7 +7,7 @@
 - 生成、独立评审、程序裁决、人工三档判定（可用 / 勉强通过 / 不可用）已闭环，判定写入 `templates/gold.csv`。
 - 标题前缀标注位（`agent_system/labels.py`）：剧情演绎 / AI生成由程序按形态与属性判定，前缀与正文合计 ≤ `max_chars`，前缀不豁免。
 - 外部搜索核查（`agent_system/verification/`，节点 N03V）：已接线但**默认关闭**，需 `.env` 里显式开启；当前只覆盖「资讯」域。
-- 测试命令：`python3 -m pytest -q`。本次整理实测 90 passed；历史运行与数据快照见 `docs/status.md`，不能替代后续重测。
+- 测试命令：`python3 -m pytest -q`。本次整理实测 104 passed；历史运行与数据快照见 `docs/status.md`，不能替代后续重测。
 
 ## 快速开始
 
@@ -16,7 +16,7 @@
 scripts/run.sh audit
 scripts/run.sh --config config.deepseek.json batch BV1Ltsf6xEpV
 
-python3 -m pytest -q                                  # 本次整理：2026-11-02，90 passed
+python3 -m pytest -q                                  # 本次整理：2026-11-02，104 passed
 python -m agent_system.cli audit
 python -m agent_system.cli run BV1Ltsf6xEpV
 python -m agent_system.cli batch --limit 10
@@ -42,6 +42,10 @@ python scripts/eval.py                               # 读 gold.csv 出四个数
 ## 运行结果边界
 
 每次任务会写入 SQLite（`runtime/agent.db`）和事件日志。候选必须经过证据引用、长度、看点引用、限定表达（引用 `limited` 陈述时标题必须写出「据…/称/网传」等限定，否则报 `G1_MISSING_LIMIT` 强制重写）和元信息表述（禁止「作者称/字幕称/口播称/旁白称/标题称」这类框架，否则报 `G4_META_PHRASE` 强制重写）检查；评审结果会标记 `uncalibrated`。只有人工确认的 Case 才能进入 Memory。
+
+理解阶段还输出**事件时间线**（`events` + `turns`）：把零碎台词与画面组织成"谁做了什么、在叙事哪个阶段"，并用 `turns` 标出事件之间的关系——`contrast`（反差/预期违背）是最容易出好标题的结构，例如"她迟到 → 他不但不怪还关心她"。没有这一层，看点只能停在台词摘录；有这一层，看点才能写"反被"这类结构。当 `turns` 里有反差且前后两个事件都有证据时，看点的钩子类型用 `contrast`；模型若因单元全被排除而放弃，程序用结构断言兜底出看点，而不是直接停下。没有一手文本支撑的事件，主语会被降级为「一方」——不许一个未核验的描述决定整条视频的人物关系。
+
+**结构断言与事实断言的判定标准不同**：事实断言（“78 名学生共用针头”）必须 grounded，即有 claim 直接支撑；结构断言（“她迟到反被关心”）是跨事件归纳，天然是推断，只要两端事件各自有证据就可以作主看点，表达时保留不确定性。但结构断言只限**事件之间的关系**（反差/转折/因果/主轴），**评价性判断**（“这份通报在替谁开脱”“这是营销话术”）不对应任何事件，不能当主看点。
 
 理解阶段后有一道程序化的「一手证据守卫」（判据 C22）：材料里只要有 ASR/OCR/原题，claim 的 `evidence_refs` 就必须至少命中其中一条；只引用模型描述（description/caption）或画面帧路径的 claim 一律降级为 `excluded`，整个语义单元的 claim 都缺一手文本时该单元也不能作看点来源。这条堵的是最贵的一种失败——描述编造出一个不存在的情节，标题照写，重写多少轮都救不回来。纯画面视频（ASR/OCR/原题都为空）不适用本项判据。
 
@@ -75,7 +79,7 @@ python scripts/eval.py                               # 读 gold.csv 出四个数
 | `rulepacks/` | 规则正文，按职责拆成 `common.md`（U 条通用）/ `domains.md`（V 条垂类）/ `forms.md`（F 条形态） | 业务知识变了才改 |
 | `templates/` | 判据库 `criteria.csv`、决策登记 `decision_register.csv`、业务用例 `cases.csv`、bad case `bad_cases.csv`、人工金标准 `gold.csv`；`anchors.md` 是三档判定的锚点样例；`README.md` 是用法说明（文件标题“五张表”沿用历史叫法） | 判定口径或案例变化时改 |
 | `data/source/` | 只读输入：100 条主表 `video_dataset.json`、采集/标注规范、改名映射。原始视频不进仓库，靠 `asset_root` 关联 | 只读 |
-| `docs/` | 产品说明、现状、节点表、评审卡、数据契约、设计稿（`design/`）、参考文档（`_ref/`，不进 git） | 每轮同步 |
+| `docs/` | 产品说明、现状、节点表、评审卡、**bad case 规范**（`bad-case-spec.md`）、数据契约、设计稿（`design/`）、参考文档（`_ref/`，不进 git） | 每轮同步 |
 | `specs/` | 需求/设计/任务/复盘存档：规则包模块化、10-30 复测复盘 | 归档，一般不动 |
 | `scripts/` | 辅助脚本：批量评测 `eval.py`、待审清单 `review_queue.py`、判据打标 `tag_criteria.py`、统一入口 `run.sh` | 偶尔 |
 | `tests/` | 单测：流水线/归一化/路由（`test_pipeline.py`）、决策接线（`test_decision_wiring.py`）、搜索核查（`test_verification.py`）、前缀与政策三分口径（`test_prefix_and_policy.py`） | 跟代码一起改 |

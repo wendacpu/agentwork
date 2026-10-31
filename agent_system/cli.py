@@ -26,7 +26,7 @@ def build(args: argparse.Namespace):
     config = RunConfig.from_json(args.config) if args.config else RunConfig()
     config.apply_env()
     dataset = Dataset.from_paths(TABLE, config.asset_root, config.ocr_mode)
-    storage = Storage(Path(config.output_dir) / "agent.db")
+    storage = Storage(Path(config.output_dir) / "agent.db", case_bank_path=(config.case_bank or None))
     return config, dataset, storage, make_pipeline(config, dataset, storage)
 
 
@@ -119,9 +119,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"task_id": args.task_id, "gold": str(path)}, ensure_ascii=False)); return 0
     if args.cmd == "case":
-        case = CaseRecord(args.case_id, args.case_type, args.problem_type, args.bad_example, args.good_example, args.applicability, args.task_id, config.rule_version, args.confirm, [config.rule_version], "confirmed" if args.confirm else "draft", args.scope, args.source_evidence, args.case_version); MemoryStore(storage.conn).create_draft(case); print(args.case_id); return 0
+        case = CaseRecord(args.case_id, args.case_type, args.problem_type, args.bad_example, args.good_example, args.applicability, args.task_id, config.prompt_pack_version, args.confirm, [config.prompt_pack_version], "confirmed" if args.confirm else "draft", args.scope, args.source_evidence, args.case_version); MemoryStore(storage.case_conn).create_draft(case); print(args.case_id); return 0
     if args.cmd == "case-list":
-        rows = [dict(r) | {"payload": json.loads(r["payload"])} for r in storage.conn.execute("SELECT case_id, payload, confirmed, rule_version FROM cases ORDER BY confirmed DESC, case_id")]
+        rows = [dict(r) | {"payload": json.loads(r["payload"])} for r in storage.case_conn.execute("SELECT case_id, payload, confirmed, rule_version FROM cases ORDER BY confirmed DESC, case_id")]
         if not args.all:
             rows = [r for r in rows if r["confirmed"]]
         if not rows:
@@ -138,12 +138,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n共 {len(rows)} 条（{storage.path}）")
         return 0
     if args.cmd == "case-show":
-        row = storage.conn.execute("SELECT * FROM cases WHERE case_id=?", (args.case_id,)).fetchone()
+        row = storage.case_conn.execute("SELECT * FROM cases WHERE case_id=?", (args.case_id,)).fetchone()
         if not row:
             print(f"没有这条案例：{args.case_id}"); return 1
         print(json.dumps(json.loads(row["payload"]), ensure_ascii=False, indent=2)); return 0
     if args.cmd == "case-confirm":
-        ok = MemoryStore(storage.conn).confirm(args.case_id)
+        ok = MemoryStore(storage.case_conn).confirm(args.case_id)
         print(json.dumps({"case_id": args.case_id, "confirmed": ok}, ensure_ascii=False)); return 0 if ok else 2
     if args.cmd == "case-from":
         row = storage.get_task(args.task_id)
