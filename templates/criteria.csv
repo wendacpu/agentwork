@@ -1,4 +1,4 @@
-﻿判据ID,判据名,具体条件（要可判定，能两人判出同一结果）,定义（怎么判）,反例（长什么样）,归属 Gate,issue_code,判定结果,判定者,当前是否已实现,规则出处,回退节点
+判据ID,判据名,具体条件（要可判定，能两人判出同一结果）,定义（怎么判）,反例（长什么样）,归属 Gate,issue_code,判定结果,判定者,当前是否已实现,规则出处,回退节点
 C01,无证据陈述,标题中的事实在 claims 里找不到，或引用的 claim 不在 usable/limited 内,标题里出现的每个事实，都要能在 claims 里找到对应项，且该项状态不是 excluded。找不到 = 无证据。,「该校已全面停课」——材料只说了筛查，没说停课。,G1,G1_UNSUPPORTED_FACT,不可用,模型 R01,是（引用白名单程序兜底）,U-B01,N05
 C02,实体角色错,"把信源/转述者/地点写成了事件主体（如""通报""当主语）","看主语是谁：如果主语是""通报/报道/网友/视频""这类信源或转述者，而不是事件中的真实主体，就是角色错。",「通报违规操作」——主语成了通报文件本身。,G1,G1_ENTITY_ROLE_MISATTRIBUTED,不可用,模型 R01,是,U-S02 / 实体角色,N05
 C03,归属缺失,"boundary 标了 attribution_required，但标题没有""据…称/表示/发布""等转述关系","boundary 标了 attribution_required 的陈述，标题里必须有""据…称/表示/发布/通报""这类转述关系词。没有 = 缺失。",「一中学筛查共用针头」——把通报内容写成了平台自己的陈述。,G1,G1_SOURCE_ATTRIBUTION_MISSING,不可用,程序,是（_has_explicit_source_relation）,U-S02,N05
@@ -8,7 +8,7 @@ C06,限定丢失,limited 陈述的必要限定（时间/条件/人群/范围）�
 C07,承诺未交付,标题承诺教程/答案/比较/完整过程，视频只给了一步或片段,看视频实际交付了什么：标题承诺教程/答案/比较/完整过程，视频只演示了一步或一个片段 = 未交付。,「零基础学会这款美甲」——视频只展示了成品，没有步骤。,G3,G3_NOT_DELIVERED,不可用,模型 R01,是,U-H03,N07
 C08,主看点缺失,标题写的不是主看点，而是次要内容或边角细节,看标题写的是不是 highlight.role=main 的那个看点：写的是边角细节 = 主看点缺失。,足球视频写「球迷穿红衣服」，而视频重点是补时进球。,G3,G3_CORE_POINT_OMITTED,不可用,模型 R01,是,U-H01,N07
 C09,过度承诺,"标题承诺了视频没有提供的结果/疗效/保证（""七天治好""）",看标题是否承诺了视频里没有出现的结果、疗效、保证、期限。,「七天治好圆肩」「全网最低价」。,G3,G3_OVER_PROMISE,不可用,模型 R01,是,U-W04 / 各 V 规则【边界】,N07
-C10,业务政策违规,命中已批准 policy 的某条 rule_id（性暗示/暴力猎奇/营销导流等）,拿标题去比对已批准 business_policy 的每条 rule_id，命中就是违规。没配置政策时不判这一条。,「点击主页领取」——营销导流，且政策规则 P2 明确禁止。,G2,G2_POLICY_VIOLATION,不可用（命中已批准 policy 的 rule_id → reject，不经重写）,模型 R01 + 程序核验 rule_id,已启用（见 config.business-policy.example.json，P1/P2/P3）,U-V01,R01
+C10,平台内容政策违规,命中已批准的平台内容安全/业务政策 rule_id（低俗性暗示/暴力猎奇/营销导流等）,拿标题去比对已批准 business_policy 的每条 rule_id，命中就是违规。没配置政策时不判这一条。,「点击主页领取」——营销导流，且政策规则 P2 明确禁止。,G2,G2_POLICY_VIOLATION,不可用（命中已批准 policy 的 rule_id → reject，不经重写）,模型 R01 + 程序核验 rule_id,已启用（见 config.business-policy.example.json，P1/P2/P3）,U-V01,R01
 C11,长度超限,NFC 后字符数 > max_chars（当前 20）,数标题字符数（NFC 后的 Unicode 码点，含标点数字空格），超过 max_chars（当前 20）即超限。,23 字的「据康平县调查组通报中学筛查共用针头涉78名学生」。,G4,G4_LENGTH_EXCEEDED,不可用,程序,是,U-B06,N09
 C12,问号结尾,标题 rstrip 后以 ? 或 ？ 结束,标题去掉尾部空白后，最后一个字符是 ? 或 ？。,「学生共用针头？」,G4,G4_ENDING_QUESTION_MARK,不可用,程序,是,title_policy,N09
 C13,引用非法,claim_id / highlight_id / evidence_id 不在本轮允许集合内,候选引用的 claim_id / highlight_id / evidence_id，只要有一个不在本轮允许集合里就是非法。,引用了本轮 boundary 没有给出的 c9。,G4,G4_INVALID_REFERENCE,不可用,程序,是,title_policy,N09

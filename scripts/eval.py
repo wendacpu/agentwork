@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# 「可用」两档：正常通过 + 勉强通过（有瑕疵但可放行）。需改写算不可用。
+# 「可用」包含可用与勉强通过；人工不负责判定是否要重写。
 USABLE_VERDICTS = {"可用", "勉强通过"}
 
 

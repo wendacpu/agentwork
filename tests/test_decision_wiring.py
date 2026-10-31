@@ -8,6 +8,7 @@
 - 案例检索 → 中文 query 与 scope 过滤是否可用
 - 人工判定 → 是否自动沉淀为案例
 """
+import csv
 import json
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from agent_system.memory import MemoryStore
 from agent_system.model import MockAdapter, ModelReply
 from agent_system.pipeline import Pipeline
 from agent_system.storage import Storage
+from agent_system.goldsheet import record as record_gold, remove as remove_gold
 from agent_system.types import CaseRecord
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -245,6 +247,42 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(rows[0]["good_example"], "")
         self.assertEqual(rows[0]["bad_example"], cand["headline"])
 
+    def test_reopen_removes_current_decision_and_allows_rejudgment(self):
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        candidate = state["candidates"][0]
+        self.storage.record_human_decision(task_id, {"candidate_id": candidate["candidate_id"], "decision": "rejected", "reason": "看点理解偏了"})
+        self.storage.reopen_human_decision(task_id, candidate["candidate_id"])
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        self.assertEqual(self.storage.get_task(task_id)["status"], "pending_human")
+        self.assertFalse(state.get("human_decisions"))
+        self.assertFalse(self.storage.conn.execute("SELECT 1 FROM labels WHERE task_id=?", (task_id,)).fetchone())
+        self.assertFalse(self.storage.conn.execute("SELECT 1 FROM cases WHERE case_id=?", (f"auto-{task_id}-{candidate['candidate_id']}",)).fetchone())
+        self.storage.record_human_decision(task_id, {"candidate_id": candidate["candidate_id"], "decision": "approved"})
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        self.assertEqual(state["human_decisions"][-1]["decision"], "approved")
+        self.assertEqual(self.storage.conn.execute("SELECT COUNT(*) FROM labels WHERE task_id=?", (task_id,)).fetchone()[0], 1)
+        self.assertEqual(self.storage.conn.execute("SELECT COUNT(*) FROM human_decisions WHERE task_id=?", (task_id,)).fetchone()[0], 1)
+
+    def test_reopen_removes_only_matching_gold_and_rejudgment_restores_latest(self):
+        with tempfile.TemporaryDirectory() as td:
+            gold = Path(td) / "gold.csv"
+            record_gold(video_id="v1", task_id="t1", candidate_id="c1", headline="标题", verdict="不可用", final_headline=None, criteria_id="", fallback_node="", reason="问题", reviewer="me", path=gold)
+            record_gold(video_id="v2", task_id="t2", candidate_id="c1", headline="另一条", verdict="可用", final_headline="另一条", criteria_id="", fallback_node="", reason="", reviewer="me", path=gold)
+            remove_gold(video_id="v1", candidate_id="c1", path=gold)
+            with gold.open(encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["video_id"], "v2")
+            record_gold(video_id="v1", task_id="t1", candidate_id="c1", headline="标题", verdict="可用", final_headline="标题", criteria_id="", fallback_node="", reason="改判", reviewer="me", path=gold)
+            with gold.open(encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 2)
+            restored = next(r for r in rows if r["video_id"] == "v1")
+            verdict_key = next(k for k in restored if k.startswith("人工判定"))
+            self.assertEqual(restored[verdict_key], "可用")
+
     def test_chinese_case_retrieval_and_scope_filter(self):
         store = MemoryStore(self.storage.conn)
         store.create_draft(CaseRecord(
@@ -261,24 +299,23 @@ class WiringTests(unittest.TestCase):
         outside = store.search("肺结核筛查涉78名学生", [], "red-dot-v0.2-modular", 3, ["美食", "烹饪教程"])
         self.assertFalse(outside, "scope 不匹配的案例不应返回")
 
-    def test_human_rejection_with_suggestion_creates_draft_case(self):
+    def test_human_rejection_creates_confirmed_negative_case_without_rewrite_suggestion(self):
         pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
         task_id = pipeline.run("BV1Ltsf6xEpV")
         state = json.loads(self.storage.get_task(task_id)["state_json"])
         candidate = state["candidates"][0]
         self.storage.record_human_decision(task_id, {
             "candidate_id": candidate["candidate_id"], "decision": "rejected",
-            "reason": "丢了来源归属", "reason_type": "expression:wording_unclear",
-            "rewrite_suggestion": "据通报康平县中学筛查涉78名学生",
+            "reason": "视频未说明筛查来源，这条标题写得像已核实", "reason_type": "", 
         })
         cases = [json.loads(r[0]) for r in self.storage.conn.execute("SELECT payload FROM cases")]
         self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0]["case_status"], "draft")
+        self.assertEqual(cases[0]["case_status"], "confirmed")
+        self.assertEqual(cases[0]["problem_type"], "root_cause_unresolved")
+        self.assertIsNone(cases[0].get("good_example") or None)
         self.assertEqual(cases[0]["source_task_id"], task_id)
         store = MemoryStore(self.storage.conn)
-        self.assertFalse(store.search("来源归属", ["expression:wording_unclear"], cases[0]["rule_version"]))
-        self.assertTrue(store.confirm(cases[0]["case_id"]))
-        self.assertTrue(store.search("来源归属", ["expression:wording_unclear"], cases[0]["rule_version"]))
+        self.assertTrue(store.search("来源归属", [], cases[0]["rule_version"]))
 
 
 if __name__ == "__main__":

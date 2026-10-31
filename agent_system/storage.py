@@ -94,18 +94,60 @@ class Storage:
                 return payload["data"]
         return None
 
+    def reopen_human_decision(self, task_id: str, candidate_id: str) -> None:
+        row = self.get_task(task_id)
+        state = json.loads(row["state_json"] or "{}")
+        candidates = state.get("candidates", [])
+        if not any(x.get("candidate_id") == candidate_id for x in candidates):
+            raise ValueError("candidate does not belong to task")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            prior = self.conn.execute("SELECT id FROM human_decisions WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=? ORDER BY id DESC LIMIT 1", (task_id, candidate_id)).fetchone()
+            if prior:
+                self.conn.execute("DELETE FROM human_decisions WHERE id=?", (prior[0],))
+            self.conn.execute("DELETE FROM labels WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=?", (task_id, candidate_id))
+            self.conn.execute("DELETE FROM events WHERE task_id=? AND node='H01' AND event_type='human_decision' AND json_extract(payload_json,'$.decision.candidate_id')=?", (task_id, candidate_id))
+            self.conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{candidate_id}",))
+            state["human_decisions"] = [x for x in state.get("human_decisions", []) if x.get("candidate_id") != candidate_id]
+            if state.get("human_decision", {}).get("candidate_id") == candidate_id:
+                state.pop("human_decision", None)
+                state.pop("final_headline", None)
+            state["human_rejected_candidate_ids"] = [x for x in state.get("human_rejected_candidate_ids", []) if x != candidate_id]
+            state["route"] = state.get("route") or {}
+            state["route"]["action"] = "handoff"
+            state["route"]["reason"] = "human_decision_reopened"
+            state["route"]["eligible_candidate_ids"] = [x.get("candidate_id") for x in candidates]
+            state["route"].pop("recommended_candidate_id", None)
+            approvals = [x for x in state["human_decisions"] if x.get("decision") in {"approved", "marginal"}]
+            if approvals:
+                state["human_decision"] = approvals[-1]
+                state["final_headline"] = approvals[-1].get("final_headline")
+                status = "approved" if approvals[-1].get("decision") == "approved" else "approved_marginal"
+            else:
+                state.pop("human_decision", None)
+                state.pop("final_headline", None)
+                status = "pending_human"
+            self.conn.execute("UPDATE tasks SET status=?,state_json=?,updated_at=? WHERE task_id=?", (status, json.dumps(state, ensure_ascii=False), now(), task_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def record_human_decision(self, task_id: str, decision: dict[str, Any]) -> None:
         row = self.get_task(task_id)
         state = json.loads(row["state_json"] or "{}")
+        if decision.get("decision") == "reopen":
+            self.reopen_human_decision(task_id, str(decision.get("candidate_id") or ""))
+            return
         # pending_human 是正常待审；stopped 里的候选同样真实（重写耗尽、业务停止），
         # 不能因为链路停了就把已产出的候选锁死——那会让可判样本凭空空掉一半。
-        if row["status"] not in {"pending_human", "stopped"}:
-            raise ValueError(f"human decisions require pending_human/stopped status (current status: {row['status']})")
+        if row["status"] not in {"pending_human", "stopped", "approved", "approved_marginal"}:
+            raise ValueError(f"human decisions require a reviewable task (current status: {row['status']})")
         candidates = state.get("candidates", [])
         candidate = next((x for x in candidates if x.get("candidate_id") == decision.get("candidate_id")), None)
         if candidate is None:
             raise ValueError("candidate does not belong to task")
-        # 三档：approved 直接可用 / marginal 勉强通过（有瑕疵但可放行）/ rejected 驳回
+        # 三档：approved 可用 / marginal 勉强通过 / rejected 不可用
         if decision.get("decision") not in {"approved", "marginal", "rejected"}:
             raise ValueError("decision must be approved, marginal or rejected")
         # 历史数据里出现过字符串 "None"（前端 null 被 str 之后），这里一并当空缺处理
@@ -115,11 +157,20 @@ class Storage:
         if passing and not decision.get("final_headline"):
             decision["final_headline"] = candidate.get("headline")
         # 勉强通过必须留下瑕疵说明，否则灰度档退化成"都能过"的橡皮章
-        if decision["decision"] == "marginal" and not str(decision.get("reason") or "").strip():
+        if decision["decision"] in {"marginal", "rejected"} and not str(decision.get("reason") or "").strip():
             raise ValueError("marginal decision requires a stated defect")
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            self.conn.execute("INSERT INTO human_decisions(task_id,payload_json) VALUES(?,?)", (task_id, json.dumps(decision, ensure_ascii=False)))
+            # 同一候选可撤回并重新判定；更新既有人工记录，避免历史判定继续影响盲评统计。
+            prior = self.conn.execute("SELECT id FROM human_decisions WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=? ORDER BY id DESC LIMIT 1", (task_id, decision["candidate_id"])).fetchone()
+            if prior:
+                self.conn.execute("UPDATE human_decisions SET payload_json=? WHERE id=?", (json.dumps(decision, ensure_ascii=False), prior[0]))
+                self.conn.execute("DELETE FROM cases WHERE case_id=?", (f"auto-{task_id}-{decision['candidate_id']}",))
+                self.conn.execute("DELETE FROM labels WHERE task_id=? AND json_extract(payload_json,'$.candidate_id')=?", (task_id, decision["candidate_id"]))
+                self.conn.execute("DELETE FROM events WHERE task_id=? AND node='H01' AND event_type='human_decision' AND json_extract(payload_json,'$.decision.candidate_id')=?", (task_id, decision["candidate_id"]))
+            else:
+                self.conn.execute("INSERT INTO human_decisions(task_id,payload_json) VALUES(?,?)", (task_id, json.dumps(decision, ensure_ascii=False)))
+            state["human_decisions"] = [x for x in state.get("human_decisions", []) if x.get("candidate_id") != decision["candidate_id"]]
             state.setdefault("human_decisions", []).append(decision)
             if decision["decision"] in {"approved", "marginal"}:
                 state["human_decision"] = decision
@@ -155,17 +206,11 @@ class Storage:
             raise
 
     def _auto_case(self, task_id: str, state: dict[str, Any], decision: dict[str, Any], candidate: dict[str, Any]) -> str | None:
-        """人工判定 → 案例草稿（D04 的语料来源）。
-
-        - 驳回且给了改写建议：落一条 draft case，等人工确认
-        - 采用且终稿与原标题不同：落一条已确认 case（这才是"人工认可的表达方式"）
-        没有可迁移的表达差异时不落库，避免噪声。
-        """
+        """人工判定 → 案例草稿（D04 的语料来源）。仅沉淀标题判定与瑕疵，不要求人工提供改写。"""
         from .types import CaseRecord
 
         original = str(candidate.get("headline") or "")
         final = str(decision.get("final_headline") or "")
-        suggestion = str(decision.get("rewrite_suggestion") or "")
         status = str(decision.get("decision") or "")
         polarity = "positive"
         if status in {"approved", "marginal"}:
@@ -176,8 +221,6 @@ class Storage:
                 good, confirmed, case_type, polarity = "", True, "expression", "negative"
             else:
                 return None
-        elif suggestion:
-            good, confirmed, case_type = suggestion, False, "expression"
         elif status == "rejected":
             # 驳回且没给改写建议：至少留下"这么写不行"的反例
             good, confirmed, case_type, polarity = "", True, "expression", "negative"
@@ -188,7 +231,7 @@ class Storage:
         domain = video.get("domain") or {}
         scope = " ".join(str(x) for x in [domain.get("一级"), domain.get("二级"), video.get("format")] if x)
         issues = next((r.get("issues", []) for r in (state.get("reviews") or []) if r.get("candidate_id") == candidate.get("candidate_id")), [])
-        problem_type = str(decision.get("reason_type") or (issues[0].get("issue_code") if issues else "expression"))
+        problem_type = str(decision.get("reason_type") or (issues[0].get("issue_code") if issues else "root_cause_unresolved"))
         case = CaseRecord(
             case_id=f"auto-{task_id}-{candidate.get('candidate_id')}", case_type=case_type,
             problem_type=problem_type, bad_example=original, good_example=good,

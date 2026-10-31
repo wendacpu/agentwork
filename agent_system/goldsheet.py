@@ -59,7 +59,7 @@ def upsert(entry: dict[str, str], path: Path | None = None) -> Path:
                   "人工判定", "人工最终标题", "命中的判据ID", "建议回退节点", "一句话理由", "判定人", "判定日期"]
 
     def value_of(key: str) -> str:
-        """gold.csv 的表头带括号说明（如"人工判定（可用/不可用/需改写）"），按前缀取值。"""
+        """gold.csv 表头可能带括号说明，按前缀匹配字段名。"""
         if key in entry:
             return entry[key]
         for entry_key, entry_value in entry.items():
@@ -84,6 +84,27 @@ def upsert(entry: dict[str, str], path: Path | None = None) -> Path:
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k, "") for k in header})
+    return target
+
+
+def remove(*, video_id: str, candidate_id: str, path: Path | None = None) -> Path:
+    """撤回人工判定时移除对应金标准行，避免旧标签继续参与评估。"""
+    target = path or GOLD
+    if not target.exists():
+        return target
+    with target.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        header = list(reader.fieldnames or [])
+        rows = list(reader)
+    key_video = next((k for k in header if k.startswith("video_id")), "video_id")
+    key_cand = next((k for k in header if k.startswith("candidate_id")), "candidate_id")
+    # 若同一视频/候选存在多个任务，仅撤回与当前任务对应的金标准记录。
+    # 已有旧表可能只有 video/candidate 唯一行；该行也按当前键移除。
+    rows = [r for r in rows if not (r.get(key_video) == video_id and r.get(key_cand) == candidate_id)]
+    with target.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
     return target
 
 

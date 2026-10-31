@@ -50,8 +50,8 @@
 不是填表，是判 15 条：
 
 1. 打开 [gold.csv](gold.csv)
-2. 对每条视频，看系统给的候选，写下 `可用 / 不可用 / 需改写`
-3. 选「可用」就写你认为的最终标题；选「不可用」就填命中的判据 ID（[criteria.csv](criteria.csv) 里有 18 条，定义和反例都写好了）
+2. 对每条视频独立判断标题，结果只选 `可用 / 勉强通过 / 不可用`
+3. 写明勉强通过或不可用的观察理由；问题归类可选，不确定根因时留空
 4. 跑 `python scripts/eval.py`
 
 判的时候你会自然发现两个口径问题：20 字够不够、哪些算「待人工」。那时候再改表，比现在拍脑袋准。
@@ -91,7 +91,7 @@
 
 | 决策 | 落地 |
 |---|---|
-| D02 四档 | `verification_required` + 全暂缓时停止并产出 `verification_tasks` |
+| D02 暂缓核验 | `verification_required` + 全暂缓时停止并产出 `verification_tasks` |
 | D02 禁止推断 | 进 N09 的 `source_requirements` + `blocked_claims` |
 | D05 五策略 | `rubric.STRATEGY_ENUM`，不符记 `Q2_STRATEGY_MISMATCH` |
 | D05 限定表达 | `Candidate.qualifiers_used` |

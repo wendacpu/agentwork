@@ -14,7 +14,7 @@ from .storage import Storage
 from .types import CaseRecord, HumanDecision
 from .memory import MemoryStore
 from .debugger import serve as serve_debugger
-from .goldsheet import record as record_gold
+from .goldsheet import record as record_gold, remove as remove_gold
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("batch"); b.add_argument("video_ids", nargs="*"); b.add_argument("--limit", type=int, default=0)
     rr = sub.add_parser("report"); rr.add_argument("task_id"); rr.add_argument("--output", default="runtime/report.html")
     rv = sub.add_parser("rereview"); rv.add_argument("task_id")
-    h = sub.add_parser("human"); h.add_argument("task_id"); h.add_argument("candidate_id"); h.add_argument("decision", choices=["approved", "marginal", "rejected"]); h.add_argument("--headline"); h.add_argument("--reason", default=""); h.add_argument("--criteria", default="", help="命中的判据 ID，如 C14"); h.add_argument("--reason-type", default="", help="如 expression:wording_unclear / upstream / manual_rewrite"); h.add_argument("--rewrite-suggestion", default=""); h.add_argument("--reviewer")
+    h = sub.add_parser("human"); h.add_argument("task_id"); h.add_argument("candidate_id"); h.add_argument("decision", choices=["approved", "marginal", "rejected"]); h.add_argument("--headline"); h.add_argument("--reason", default=""); h.add_argument("--criteria", default="", help="可选问题归类 ID；不确定根因时留空"); h.add_argument("--reason-type", default="", help="可选根因归类；不确定时留空"); h.add_argument("--reviewer")
     c = sub.add_parser("case"); c.add_argument("task_id"); c.add_argument("case_id"); c.add_argument("case_type", choices=["rule", "fact", "expression"]); c.add_argument("problem_type"); c.add_argument("bad_example"); c.add_argument("good_example"); c.add_argument("applicability"); c.add_argument("--confirm", action="store_true"); c.add_argument("--scope", default=""); c.add_argument("--source-evidence", nargs="*", default=[]); c.add_argument("--case-version", default="v1")
     cl = sub.add_parser("case-list"); cl.add_argument("--all", action="store_true", help="含未确认草稿")
     cs = sub.add_parser("case-show"); cs.add_argument("case_id")
@@ -98,8 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "candidate_id": args.candidate_id, "decision": args.decision,
             "final_headline": args.headline, "reason": args.reason, "reviewer": args.reviewer,
-            "criteria_id": args.criteria, "reason_type": args.reason_type,
-            "rewrite_suggestion": args.rewrite_suggestion or None,
+            "criteria_id": args.criteria or None, "reason_type": args.reason_type or None,
         }
         storage.record_human_decision(args.task_id, payload)
         # 判定必须同时进 gold.csv，否则 eval 读不到（CLI 与调试台走同一条口径）
