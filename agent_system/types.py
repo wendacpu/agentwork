@@ -76,6 +76,19 @@ class Claim:
 
 
 @dataclass
+class SemanticUnit:
+    """视频级语义单元：一个跨片段/跨模态的完整意思，而非单句或单帧摘录。"""
+    unit_id: str
+    meaning: str
+    claim_ids: list[str]
+    evidence_ids: list[str]
+    kind: str = "support"
+    time_range: tuple[float, float] | None = None
+    role_in_video: str = ""
+    corroboration: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class Understanding:
     main_format: str
     attributes: list[str]
@@ -83,6 +96,7 @@ class Understanding:
     event_times: list[dict[str, Any]]
     extracted_sources: list[SourceRef]
     conflicts: list[dict[str, Any]] = field(default_factory=list)
+    semantic_units: list[SemanticUnit] = field(default_factory=list)
 
 
 @dataclass
@@ -110,10 +124,23 @@ class ClaimDecision:
 
 
 @dataclass
+class UnitDecision:
+    """语义单元能否作为看点来源的判断；原子 claim 的事实核验仍在其 decisions 里。"""
+    unit_id: str
+    decision: Decision
+    required_limits: list[str] = field(default_factory=list)
+    forbidden_inferences: list[str] = field(default_factory=list)
+    attribution_required: bool = False
+    required_source_phrase: str | None = None
+    reason: str = ""
+
+
+@dataclass
 class BoundarySet:
     decisions: list[ClaimDecision]
     unresolved_issues: list[dict[str, Any]] = field(default_factory=list)
     global_requirements: dict[str, Any] = field(default_factory=dict)
+    unit_decisions: list[UnitDecision] = field(default_factory=list)
 
 
 @dataclass
@@ -127,6 +154,7 @@ class Highlight:
     viewer_value: str = ""
     required_qualifiers: list[str] = field(default_factory=list)
     selection_reason: str = ""
+    unit_id: str = ""
 
 
 @dataclass

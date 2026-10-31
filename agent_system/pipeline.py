@@ -16,7 +16,7 @@ from .rules import load_common_rule_ids, load_rule_bundle, load_rules, rubric
 from .prompts import prompt_for
 from .schemas import GATE_IDS, QUALITY_IDS, validate_review
 from .storage import Storage
-from .types import BoundarySet, Claim, Highlight, Understanding, to_dict
+from .types import BoundarySet, Claim, Highlight, SemanticUnit, Understanding, UnitDecision, to_dict
 
 
 def _validate_ids(items: list[dict[str, Any]], key: str, allowed: set[str]) -> list[str]:
@@ -197,11 +197,44 @@ def _normalize_understanding(raw: dict[str, Any]) -> Understanding:
         attrs = [f"{k}:{v}" for k, v in attrs.items()]
     event_times = raw.get("event_times") or raw.get("event_time") or []
     if isinstance(event_times, dict): event_times = [event_times]
+    units_raw = raw.get("semantic_units") or raw.get("semanticUnits") or []
+    if not isinstance(units_raw, list):
+        units_raw = []
+    semantic_units: list[SemanticUnit] = []
+    for i, item in enumerate(units_raw):
+        if not isinstance(item, dict):
+            continue
+        tr = item.get("time_range") or item.get("time_range_s")
+        if isinstance(tr, (list, tuple)) and len(tr) == 2:
+            try:
+                tr = (float(tr[0]), float(tr[1]))
+            except (TypeError, ValueError):
+                tr = None
+        else:
+            tr = None
+        semantic_units.append(SemanticUnit(
+            unit_id=str(item.get("unit_id") or f"u{i+1}"),
+            meaning=str(item.get("meaning") or item.get("content") or item.get("thesis") or ""),
+            claim_ids=[str(x) for x in (item.get("claim_ids") or item.get("claims") or [])],
+            evidence_ids=[str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])],
+            kind=str(item.get("kind") or "support"),
+            time_range=tr,
+            role_in_video=str(item.get("role_in_video") or item.get("role") or ""),
+            corroboration=item.get("corroboration") if isinstance(item.get("corroboration"), dict) else {},
+        ))
+    # 降级：模型未输出语义单元时，每条原子 claim 包成一个单元，保持旧链路行为
+    if not semantic_units:
+        for i, c in enumerate(claims):
+            semantic_units.append(SemanticUnit(
+                unit_id=f"u{i+1}", meaning=c.text, claim_ids=[c.claim_id],
+                evidence_ids=list(c.evidence_refs), kind="support",
+            ))
     return Understanding(
         main_format=str(raw.get("main_format") or raw.get("content_format") or (raw.get("video") or {}).get("format") or "unknown"),
         attributes=[str(x) for x in attrs], claims=claims, event_times=event_times,
         extracted_sources=raw.get("extracted_sources", []) if isinstance(raw.get("extracted_sources", []), list) else [],
         conflicts=raw.get("conflicts", []) if isinstance(raw.get("conflicts", []), list) else [],
+        semantic_units=semantic_units,
     )
 
 
@@ -258,7 +291,29 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             source_evidence_refs=[str(x) for x in (item.get("source_evidence_refs") or item.get("source_refs") or [])],
             verification_required=bool(item.get("verification_required") or item.get("pending_verification")),
         ))
-    return BoundarySet(decisions=decisions, unresolved_issues=raw.get("unresolved_issues", []) if isinstance(raw.get("unresolved_issues", []), list) else [], global_requirements=global_requirements)
+    units_items = raw.get("unit_decisions") or raw.get("unitDecisions") or []
+    if isinstance(units_items, dict):
+        units_items = [{"unit_id": k, **(v if isinstance(v, dict) else {})} for k, v in units_items.items()]
+    if not isinstance(units_items, list):
+        units_items = []
+    unit_decisions: list[UnitDecision] = []
+    for i, item in enumerate(units_items):
+        if not isinstance(item, dict):
+            continue
+        decision = str(item.get("decision") or item.get("status") or item.get("verdict") or "excluded")
+        if decision in {"allowed", "eligible"}: decision = "usable"
+        if decision == "usable_with_limits": decision = "limited"
+        if decision not in {"usable", "limited", "excluded"}: decision = "excluded"
+        unit_decisions.append(UnitDecision(
+            unit_id=str(item.get("unit_id") or f"u{i+1}"),
+            decision=decision,
+            required_limits=[str(x) for x in (item.get("required_limits") or item.get("limits") or [])],
+            forbidden_inferences=[str(x) for x in (item.get("forbidden_inferences") or [])],
+            attribution_required=bool(item.get("attribution_required") or item.get("required_attribution")),
+            required_source_phrase=item.get("required_source_phrase") or item.get("required_attribution"),
+            reason=str(item.get("reason") or item.get("rationale") or ""),
+        ))
+    return BoundarySet(decisions=decisions, unresolved_issues=raw.get("unresolved_issues", []) if isinstance(raw.get("unresolved_issues", []), list) else [], global_requirements=global_requirements, unit_decisions=unit_decisions)
 
 
 def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: str | None) -> list[dict[str, Any]]:
@@ -283,7 +338,7 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
             text_id = str(claim_id)
             if text_id.startswith("c-") and text_id[2:].isdigit(): text_id = "c" + str(int(text_id[2:]))
             claim_ids.append(text_id)
-        out.append({"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(headline), "highlight_id": str(item.get("highlight_id") or "h1"), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": ([str(item["qualifiers_used"])] if isinstance(item.get("qualifiers_used"), str) else [str(x) for x in (item.get("qualifiers_used") or [])]), "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors})
+        out.append({"candidate_id": str(item.get("candidate_id") or item.get("draft_id") or item.get("id") or f"a{rewrite_round+1}-{i+1}"), "headline": str(headline), "highlight_id": str(item.get("highlight_id") or "h1"), "unit_id": str(item.get("unit_id") or item.get("semantic_unit_id") or ""), "claim_ids": claim_ids, "evidence_ids": [str(x) for x in (item.get("evidence_ids") or item.get("evidence_refs") or [])], "expression_strategy": str(item.get("expression_strategy") or item.get("strategy") or "unknown"), "used_case_ids": [str(x) for x in (item.get("used_case_ids") or [])], "generation_round": int(item.get("generation_round", rewrite_round)), "parent_candidate_id": item.get("parent_candidate_id") or parent_id, "change_reason": str(item.get("change_reason") or ""), "qualifiers_used": ([str(item["qualifiers_used"])] if isinstance(item.get("qualifiers_used"), str) else [str(x) for x in (item.get("qualifiers_used") or [])]), "addressed_issue_ids": [str(x) for x in (item.get("addressed_issue_ids") or [])], "generation_schema_errors": candidate_schema_errors})
     return out
 
 
@@ -313,6 +368,7 @@ def _normalize_highlights(raw: dict[str, Any], allowed_claim_ids: set[str], fall
             viewer_value=str(item.get("viewer_value") or item.get("what_user_can_see") or value),
             required_qualifiers=[str(x) for x in (item.get("required_qualifiers") or item.get("required_limits") or item.get("qualifiers") or [])],
             selection_reason=str(item.get("selection_reason") or item.get("representativeness") or ""),
+            unit_id=str(item.get("unit_id") or item.get("semantic_unit_id") or ""),
         ))
     return result[:3] or fallback
 
@@ -396,7 +452,7 @@ def _default_rollback(issue: dict[str, Any]) -> str:
     return "R01"
 
 
-def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], allowed_highlights: set[str], evidence_ids: set[str], max_chars: int) -> dict[str, Any]:
+def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], allowed_highlights: set[str], evidence_ids: set[str], max_chars: int, allowed_units: set[str] | None = None) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     errors.extend({"code": "G4_SCHEMA_INVALID", "repairable": True, "reason": error} for error in candidate.get("generation_schema_errors", []))
     title = str(candidate.get("headline") or "")
@@ -410,6 +466,9 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
         errors.append({"code": "G4_REQUIRED_FIELD_MISSING", "repairable": True, "reason": "candidate_id、claim_ids 或 evidence_ids 缺失"})
     if candidate.get("highlight_id") not in allowed_highlights or any(x not in allowed_claims for x in candidate.get("claim_ids", [])):
         errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": "claim_id 或 highlight_id 不在当前任务范围"})
+    unit_id = candidate.get("unit_id")
+    if unit_id and allowed_units is not None and unit_id not in allowed_units:
+        errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": "unit_id 不在当前任务范围"})
     invalid_evidence = [x for x in candidate.get("evidence_ids", []) if x not in evidence_ids]
     if invalid_evidence:
         errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": f"无效 evidence_id: {invalid_evidence}"})
@@ -560,7 +619,7 @@ class Pipeline:
             state = {"video": to_dict(video), "rewrite_round": 0, "reviews": [], "candidates": [], "business_policy": self._business_policy(), "run_manifest": self._manifest(task_id), "prompt_hashes": {}}
         return self._execute(task_id, video, state)
 
-    def _execute(self, task_id: str, video: Any, state: dict[str, Any]) -> str:
+    def _execute(self, task_id: str, video: Any, state: dict[str, Any]) -> str:  # dsh-skip-func-length
         try:
             self.storage.set_state(task_id, "generating", state)
             understanding_raw = self._call(task_id, "N03", "understand", {
@@ -579,7 +638,7 @@ class Pipeline:
             state["rule_bundle_hash"] = hashlib.sha256(json.dumps(state["rules"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             self.storage.event(task_id, "N04", "rule_match", rule_bundle.as_context())
             self.storage.checkpoint(task_id, "generating", state, "N04", "rules", {"rule_ids": state["rules"].get("rule_ids", []), "rule_bundle_hash": state["rule_bundle_hash"]})
-            boundary_raw = self._call(task_id, "N05", "boundary", {"video": to_dict(video), "claims": to_dict(understanding.claims), "rules": [asdict(x) for x in load_rules()], "matched_rules": rule_bundle.as_context()}, "BoundarySet")
+            boundary_raw = self._call(task_id, "N05", "boundary", {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "rules": [asdict(x) for x in load_rules()], "matched_rules": rule_bundle.as_context()}, "BoundarySet")
             boundary = _normalize_boundary(boundary_raw, {c.claim_id: c.text for c in understanding.claims})
             # Models sometimes format ordinal IDs as c-01/c-02. Reconcile by
             # output order only when the returned ID is not in the upstream set;
@@ -601,12 +660,25 @@ class Pipeline:
             fallback_highlights = [Highlight(f"h{i+1}", [d.claim_id], d.supported_statement or "", "由可用陈述覆盖", d.evidence_refs, "main" if i == 0 else "backup", d.supported_statement or "") for i, d in enumerate(allowed[:3])]
             highlight_raw = self._call(task_id, "N07", "highlight", {
                 "video": to_dict(video), "claims": to_dict(understanding.claims),
+                "semantic_units": to_dict(understanding.semantic_units),
+                "unit_decisions": to_dict(boundary.unit_decisions),
                 "boundary": to_dict(boundary), "matched_rules": rule_bundle.as_context(),
             }, "HighlightSet")
             if bool(highlight_raw.get("abandon") or highlight_raw.get("no_viable_highlight")):
                 state["highlight_selection"] = {"abandoned": True, "reason": str(highlight_raw.get("reason") or ""), "eliminated": highlight_raw.get("eliminated", [])}
                 return self._stop(task_id, state, "NO_VIABLE_HIGHLIGHT")
             highlights = _normalize_highlights(highlight_raw, {d.claim_id for d in allowed}, fallback_highlights)
+            # 模型未在 highlight 上给 unit_id 时，用其 claim_ids 反查所属语义单元补齐
+            claim_to_unit: dict[str, str] = {}
+            for u in understanding.semantic_units:
+                for cid in u.claim_ids:
+                    claim_to_unit.setdefault(cid, u.unit_id)
+            for h in highlights:
+                if not h.unit_id:
+                    for cid in h.claim_ids:
+                        if cid in claim_to_unit:
+                            h.unit_id = claim_to_unit[cid]
+                            break
             if not highlights:
                 return self._stop(task_id, state, "NO_HIGHLIGHT")
             state["highlight_selection"] = {"abandoned": False, "eliminated": highlight_raw.get("eliminated", []) if isinstance(highlight_raw.get("eliminated"), list) else []}
@@ -792,7 +864,7 @@ class Pipeline:
             for decision in boundary.decisions
             if decision.decision == "excluded" or decision.verification_required
         ]
-        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "matched_rules": state.get("rules", {}), "display_config": {"max_chars": self.config.max_chars, "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
+        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "matched_rules": state.get("rules", {}), "display_config": {"max_chars": self.config.max_chars, "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
         parent_review = next((r for r in state.get("reviews", []) if r.get("candidate_id") == (source or {}).get("candidate_id")), {})
         rewrite_mode = "表达"
         if source:
@@ -832,9 +904,12 @@ class Pipeline:
                 candidate.setdefault("generation_schema_errors", []).append(f"duplicate candidate_id: {cid}")
             seen_candidate_ids.add(cid)
         allowed_claims = {d.claim_id for d in boundary.decisions if d.decision != "excluded"}; allowed_highlights = {h.highlight_id for h in highlights}
+        allowed_units = {d.unit_id for d in boundary.unit_decisions if d.decision != "excluded"}
+        if not allowed_units:
+            allowed_units = {u.unit_id for u in understanding.semantic_units}
         boundary_by_claim = {d.claim_id: d for d in boundary.decisions}
         for c in candidates:
-            c["mechanical_checks"] = _mechanical_check(c, allowed_claims=allowed_claims, allowed_highlights=allowed_highlights, evidence_ids={e.evidence_id for e in video.evidence}, max_chars=self.config.max_chars)
+            c["mechanical_checks"] = _mechanical_check(c, allowed_claims=allowed_claims, allowed_highlights=allowed_highlights, evidence_ids={e.evidence_id for e in video.evidence}, max_chars=self.config.max_chars, allowed_units=allowed_units)
             c["programmatic_g1_flags"] = []
             source_required = any(
                 boundary_by_claim.get(claim_id)

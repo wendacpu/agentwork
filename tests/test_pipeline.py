@@ -8,6 +8,7 @@ from agent_system.data import Dataset
 from agent_system.model import MockAdapter, ModelReply
 from agent_system.pipeline import Pipeline
 from agent_system.pipeline import _decide_candidate, _normalize_boundary, _normalize_candidates, _normalize_highlights, _normalize_reviews, _normalize_understanding
+from agent_system.prompts import BOUNDARY_PROMPT, HIGHLIGHT_PROMPT, UNDERSTAND_PROMPT
 from agent_system.rules import load_common_rule_ids, load_rule_bundle, rubric
 from agent_system.rules.loader import load_domain_rules, load_form_rules
 from agent_system.schemas import validate_review
@@ -243,6 +244,84 @@ class PipelineTests(unittest.TestCase):
         source_description = next((item for item in video.evidence if item.evidence_id == "e-source-description"), None)
         self.assertIsNotNone(source_description)
         self.assertEqual(source_description.quality, "unverified_source_metadata")
+
+    def test_prompts_require_description_caption_and_semantic_units(self):
+        for field_name in ("description", "caption"):
+            self.assertIn(field_name, UNDERSTAND_PROMPT)
+            self.assertIn(field_name, HIGHLIGHT_PROMPT)
+        # 三个描述性输入被明确区分，而不是混为"用户/上传者文本"
+        self.assertIn("searchDesc", UNDERSTAND_PROMPT)
+        self.assertIn("创作者意图", UNDERSTAND_PROMPT)
+        self.assertIn("上传者", UNDERSTAND_PROMPT)
+        self.assertIn("不得因置信度低而忽略", UNDERSTAND_PROMPT)
+        self.assertIn("semantic_units", UNDERSTAND_PROMPT)
+        self.assertIn("candidate_claims 是语义单元内的原子事实层", UNDERSTAND_PROMPT)
+        self.assertIn("unit_decisions", BOUNDARY_PROMPT)
+        self.assertIn("unit_id", HIGHLIGHT_PROMPT)
+        self.assertIn("看点直接来源于输入 semantic_units", HIGHLIGHT_PROMPT)
+        self.assertIn("不得把每句 ASR", HIGHLIGHT_PROMPT)
+        self.assertIn("完整 ASR 话语链", HIGHLIGHT_PROMPT)
+
+    def test_normalize_understanding_parses_semantic_units(self):
+        raw = {
+            "main_format": "资讯播报",
+            "claims": [
+                {"claim_id": "c1", "text": "第一句", "evidence_refs": ["e1"]},
+                {"claim_id": "c2", "text": "第二句", "evidence_refs": ["e2"]},
+            ],
+            "semantic_units": [
+                {"unit_id": "u1", "meaning": "两句合起来是一个因果", "kind": "causal",
+                 "claim_ids": ["c1", "c2"], "evidence_ids": ["e1", "e2"],
+                 "time_range": [1.0, 5.0], "role_in_video": "主旨",
+                 "corroboration": {"source": "description", "status": "consistent", "notes": "印证", "evidence_ids": ["e1"]}},
+            ],
+        }
+        understanding = _normalize_understanding(raw)
+        self.assertEqual(len(understanding.semantic_units), 1)
+        u = understanding.semantic_units[0]
+        self.assertEqual(u.unit_id, "u1")
+        self.assertEqual(u.claim_ids, ["c1", "c2"])
+        self.assertEqual(u.evidence_ids, ["e1", "e2"])
+        self.assertEqual(u.time_range, (1.0, 5.0))
+        self.assertEqual(u.role_in_video, "主旨")
+        self.assertEqual(u.corroboration["status"], "consistent")
+
+    def test_normalize_understanding_falls_back_to_claim_units(self):
+        raw = {
+            "claims": [
+                {"claim_id": "c1", "text": "第一句", "evidence_refs": ["e1"]},
+                {"claim_id": "c2", "text": "第二句", "evidence_refs": ["e2"]},
+            ],
+        }
+        understanding = _normalize_understanding(raw)
+        self.assertEqual([u.unit_id for u in understanding.semantic_units], ["u1", "u2"])
+        self.assertEqual(understanding.semantic_units[0].claim_ids, ["c1"])
+
+    def test_normalize_boundary_parses_unit_decisions(self):
+        raw = {
+            "decisions": [{"claim_id": "c1", "decision": "usable", "evidence_refs": ["e1"]}],
+            "unit_decisions": [{"unit_id": "u1", "decision": "usable", "required_limits": [], "attribution_required": False, "reason": "可作看点来源"}],
+        }
+        boundary = _normalize_boundary(raw, {"c1": "第一句"})
+        self.assertEqual(len(boundary.unit_decisions), 1)
+        self.assertEqual(boundary.unit_decisions[0].unit_id, "u1")
+        self.assertEqual(boundary.unit_decisions[0].decision, "usable")
+
+    def test_normalize_highlights_binds_unit_id(self):
+        raw = {"highlights": [{"highlight_id": "h1", "value": "看点", "claim_ids": ["c1"], "evidence_ids": ["e1"], "unit_id": "u1", "role": "main"}]}
+        highlights = _normalize_highlights(raw, {"c1"}, [])
+        self.assertEqual(highlights[0].unit_id, "u1")
+
+    def test_mock_run_propagates_semantic_units_through_state(self):
+        task_id = self.pipeline.run("BV1Ltsf6xEpV")
+        state = json.loads(self.storage.get_task(task_id)["state_json"])
+        units = state["understanding"]["semantic_units"]
+        self.assertTrue(units)
+        self.assertEqual(units[0]["unit_id"], "u1")
+        self.assertEqual(state["boundary"]["unit_decisions"][0]["unit_id"], "u1")
+        self.assertTrue(state["highlights"])
+        self.assertIn("unit_id", state["highlights"][0])
+        self.assertEqual(state["highlights"][0]["unit_id"], "u1")
 
     def test_issue_dimension_must_be_unique_and_match_code(self):
         review = {

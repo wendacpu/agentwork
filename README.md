@@ -21,7 +21,7 @@ python scripts/eval.py                               # 读 gold.csv 出四个数
 
 项目数据文件已经统一为英文命名并放在 `data/source/`；`docs/design/` 保存流程设计稿和思维导图。原始视频目录不复制进项目，使用 `config.example.json` 的 `asset_root` 关联。
 
-规则正文按职责拆在 `rulepacks/common.md`、`rulepacks/domains.md` 和 `rulepacks/forms.md`。`agent_system/rules/` 负责规则模型、路由、加载和 Rubric；运行时由 `load_rule_bundle()` 按领域和内容形态选择 U/V/F 规则，并把 `rule_ids`、匹配原因和缺口写入任务状态。P3 看点节点会在候选生成前独立产出主/备选看点；生成、重写和独立评审共享本次规则切片，但评审不读取生成自评。
+规则正文按职责拆在 `rulepacks/common.md`、`rulepacks/domains.md` 和 `rulepacks/forms.md`。`agent_system/rules/` 负责规则模型、路由、加载和 Rubric；运行时由 `load_rule_bundle()` 按领域和内容形态选择 U/V/F 规则，并把 `rule_ids`、匹配原因和缺口写入任务状态。理解节点先把整条视频整合成跨片段、跨模态的语义单元（而非逐句 ASR/OCR 拆看点），每个单元聚合其原子陈述与证据并记录描述/意图/上传者说明的交叉印证；P3 看点节点再从语义单元中挑主/备选看点。生成、重写和独立评审共享本次规则切片，但评审不读取生成自评。
 
 ## 运行结果边界
 
