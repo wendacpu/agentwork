@@ -834,80 +834,196 @@ def _apply_numeric_conflict_gate(video: Any, understanding: Any, boundary: Any) 
     return boundary
 
 
-def _grouped_boundary_decisions(raw: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """模型常按决策分组合规 ID（usable_claims/limited_claims/excluded_claims），而不是逐条给决策对象。
+BOUNDARY_ENVELOPE_KEYS = ("boundary_set", "BoundarySet", "boundarySet")
+# 分组键别名。allowed_claims 是真实模型用过的写法（BV1j6JR6AEAh）：漏认它会把
+# 5 条 usable 读成 0，整任务按 NO_USABLE_CLAIM 白跑。
+BOUNDARY_GROUP_ALIASES = (
+    ("usable", ("usable_claims", "usable", "allowed_claims", "allowed")),
+    ("limited", ("limited_claims", "limited")),
+    ("excluded", ("excluded_claims", "excluded")),
+)
+BOUNDARY_OBJECT_CONTAINERS = ("decisions", "claim_decisions", "items", "boundaries", "claims")
+BOUNDARY_PENDING_KEYS = ("verification_required_claims", "verification_pending", "verification_required")
+_BOUNDARY_DECISION_RANK = {"usable": 0, "limited": 1, "excluded": 2}
+BOUNDARY_DECISION_MISSING = "BOUNDARY_DECISION_MISSING"
 
-    认不出这种形状会得到 0 条 decision，整任务被判 NO_USABLE_CLAIM 白跑——真实发生过：
-    模型明确给了 7 条 usable，程序读成 0。这里按「最严者胜」合并重复 ID。
+
+def _iter_boundary_layers(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """按「外层优先」广度遍历 raw 及其所有边界信封容器。
+
+    真实模型会把同一份决策拆到不同层级：完整 claim 对象在顶层，决策分组在
+    boundary_set 里（BV13ZHT6AEYW）。只看一层必然漏读。
     """
-    if any(key in raw for key in ("decisions", "claim_decisions", "items", "boundaries")):
-        return None
-    groups = (
-        ("usable", ("usable_claims", "usable")),
-        ("limited", ("limited_claims", "limited")),
-        ("excluded", ("excluded_claims", "excluded")),
-    )
-    if not any(isinstance(raw.get(alias), list) for _, aliases in groups for alias in aliases):
-        return None
-    rank = {"usable": 0, "limited": 1, "excluded": 2}
-    merged: dict[str, str] = {}
-    for decision, aliases in groups:
-        values = next((raw[a] for a in aliases if isinstance(raw.get(a), list)), [])
-        for cid in values:
-            cid = str(cid)
-            if cid and rank[decision] >= rank.get(merged.get(cid, ""), -1):
-                merged[cid] = decision
-    pending = {str(x) for x in (raw.get("verification_required_claims") or raw.get("verification_required") or []) if str(x)}
-    for cid in pending:
-        merged.setdefault(cid, "limited")
-    if not merged:
+    layers: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    queue: list[Any] = [raw]
+    while queue:
+        layer = queue.pop(0)
+        if not isinstance(layer, dict) or id(layer) in seen:
+            continue
+        seen.add(id(layer))
+        layers.append(layer)
+        for key in BOUNDARY_ENVELOPE_KEYS:
+            nested = layer.get(key)
+            if isinstance(nested, dict):
+                queue.append(nested)
+    return layers
+
+
+def _boundary_pending_ids(layer: dict[str, Any]) -> set[str]:
+    for key in BOUNDARY_PENDING_KEYS:
+        value = layer.get(key)
+        if isinstance(value, list):
+            return {str(x) for x in value if str(x)}
+    return set()
+
+
+def collect_boundary_groups(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """收集所有层级的「按决策分组」结果，作为逐条决策的覆盖层。
+
+    按「最严者胜」合并重复 ID（一条 claim 同时出现在 usable 与 excluded 时取 excluded）。
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for layer in _iter_boundary_layers(raw):
+        for decision, aliases in BOUNDARY_GROUP_ALIASES:
+            values = next((layer[a] for a in aliases if isinstance(layer.get(a), list)), None)
+            if values is None:
+                continue
+            for cid in values:
+                cid = str(cid)
+                if not cid:
+                    continue
+                current = merged.setdefault(cid, {})
+                if _BOUNDARY_DECISION_RANK[decision] >= _BOUNDARY_DECISION_RANK.get(str(current.get("decision") or ""), -1):
+                    current["decision"] = decision
+        pending = _boundary_pending_ids(layer)
+        if isinstance(layer.get("verification_required"), bool) and layer["verification_required"]:
+            # 布尔式 verification_required=true 只在 limited 组内联时才是 claim 级信号，
+            # 这里只在它旁边确实有可用清单时采纳，避免把全局标志读成逐条待核。
+            pending = pending | {str(x) for x in (layer.get("usable_claims") or []) if str(x)}
+        for cid in pending:
+            merged.setdefault(cid, {}).setdefault("decision", "limited")
+            merged[cid]["verification_required"] = True
+    return merged
+
+
+def collect_boundary_objects(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """收集所有层级的逐条 claim 决策对象，外层优先、同一 ID 不覆盖。
+
+    分组摘要只提供 decision，会丢掉 required_limits / forbidden_inferences /
+    original_source 等字段；完整对象必须保留，不能被分组摘要换掉。
+    """
+    ordered: dict[str, dict[str, Any]] = {}
+    for layer in _iter_boundary_layers(raw):
+        for name in BOUNDARY_OBJECT_CONTAINERS:
+            seq = layer.get(name)
+            if not isinstance(seq, list):
+                continue
+            for item in seq:
+                if not isinstance(item, dict):
+                    continue
+                cid = item.get("claim_id") or item.get("id")
+                if cid is None or str(cid) in ordered:
+                    continue
+                ordered[str(cid)] = item
+    return list(ordered.values())
+
+
+def _summary_keyed_values(raw: dict[str, Any], *keys: str) -> dict[str, list[str]]:
+    """解析 "c2: 须保留…" 这种按 claim 编号成条摘要的字段。"""
+    out: dict[str, list[str]] = {}
+    for layer in _iter_boundary_layers(raw):
+        for key in keys:
+            seq = layer.get(key)
+            if not isinstance(seq, list):
+                continue
+            for entry in seq:
+                text = str(entry)
+                for sep in (":", "："):
+                    head, found, tail = text.partition(sep)
+                    if found and 0 < len(head.strip()) <= 8 and tail.strip():
+                        out.setdefault(head.strip(), []).append(tail.strip())
+                        break
+    return out
+
+
+def _grouped_boundary_decisions(raw: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """按决策分组的 ID 列表 → 逐条决策对象（兼容包装，勿用于替换完整对象）。"""
+    groups = collect_boundary_groups(raw)
+    if not groups:
         return None
     items = []
-    for cid, decision in merged.items():
-        item: dict[str, Any] = {"claim_id": cid, "decision": decision}
-        if cid in pending:
+    for cid, group in groups.items():
+        item: dict[str, Any] = {"claim_id": cid, "decision": group.get("decision") or "excluded"}
+        if group.get("verification_required"):
             item["verification_required"] = True
         items.append(item)
     return items
 
 
+def _missing_boundary_claims(boundary: BoundarySet) -> list[str]:
+    """取出「模型没表态、被兜底成 excluded」的 claim id 清单。"""
+    ids: list[str] = []
+    for issue in getattr(boundary, "unresolved_issues", None) or []:
+        if isinstance(issue, dict) and str(issue.get("code") or "") == BOUNDARY_DECISION_MISSING:
+            ids.extend(str(x) for x in (issue.get("claim_ids") or []))
+    return sorted(set(ids))
+
+
+def _normalize_boundary_decision(value: Any) -> str | None:
+    """边界决策枚举归一。认不出的值返回 None —— 不许静默当成 excluded。"""
+    if isinstance(value, bool):
+        return "usable" if value else "excluded"
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().lower()
+    if text in {"usable", "useable", "allowed", "eligible", "allow"}:
+        return "usable"
+    if text in {"limited", "usable_with_limits", "useable_with_limits", "with_limits", "partially_usable"}:
+        return "limited"
+    if text in {"verification_required", "pending_verification", "needs_verification", "uncertain", "qualified"}:
+        return "limited"
+    if text in {"excluded", "exclude", "forbidden", "blocked", "not_usable"}:
+        return "excluded"
+    return None
+
+
+def _boundary_item_decision(item: dict[str, Any]) -> str | None:
+    for key in ("decision", "status", "verdict", "usable"):
+        if key in item:
+            resolved = _normalize_boundary_decision(item.get(key))
+            if resolved:
+                return resolved
+    return None
+
+
 def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None = None, claim_evidence: dict[str, list[str]] | None = None) -> BoundarySet:
     from .types import ClaimDecision
-    # 模型可能把决策放在外层 claims/semantic_units、只把摘要放进 BoundarySet 信封。
-    # 直接换成内层会把决策整批丢掉，得到 0 条 decision，再被判 NO_USABLE_CLAIM 静默停机。
-    # 所以是「合并」而不是「替换」，且外层优先。
+    # 模型会把完整 claim 对象放外层、决策分组放 boundary_set（BV13ZHT6AEYW），或者反过来。
+    # 任何「换成某一层」的做法都会整批丢决策：这里保留所有层级，逐层收集后再合并。
     envelope = raw.get("BoundarySet") if isinstance(raw.get("BoundarySet"), dict) else raw.get("boundarySet")
     if isinstance(envelope, dict):
         raw = {**envelope, **raw}
-    global_requirements = {}
-    if isinstance(raw.get("boundary_set"), dict):
-        metadata = raw["boundary_set"]
+    layers = _iter_boundary_layers(raw)
+    global_requirements: dict[str, Any] = {}
+    for metadata in layers:
         for key, aliases in {
             "required_subject": ("required_subject", "must_keep_subject"),
             "required_source_phrase": ("required_source_phrase", "source_phrase_required"),
             "generic_subject_not_allowed": ("generic_subject_not_allowed",),
             "length_feasibility": ("length_feasibility",),
         }.items():
+            if key in global_requirements:
+                continue
             for alias in aliases:
                 if alias in metadata:
                     global_requirements[key] = metadata[alias]
                     break
-    for key in ("boundary_set", "BoundarySet", "boundarySet"):
-        nested = raw.get(key)
-        if not isinstance(nested, dict):
-            continue
-        # boundary_set 里的 claims/unit_decisions 可能是「id 字符串列表」（全局元数据），
-        # 不是决策对象；只有元素为 dict 时才把它当决策容器展开，否则保留外层原始决策。
-        nested_claims = nested.get("claims")
-        claims_are_objects = isinstance(nested_claims, list) and bool(nested_claims) and all(isinstance(x, dict) for x in nested_claims)
-        has_decision_container = any(name in nested for name in ("decisions", "claim_decisions", "items", "boundaries"))
-        if has_decision_container or claims_are_objects or (key in {"BoundarySet", "boundarySet"} and nested and all(isinstance(value, dict) for value in nested.values())):
-            raw = nested
-            break
-    # 真实模型最常给的形状是 {"boundary_set": {"claim_decisions": [...]}}：
-    # 认不出就会得到 0 条 decision，然后被判 NO_USABLE_CLAIM 静默停机（20 秒 + 2 万 token 白跑）
-    grouped = _grouped_boundary_decisions(raw)
-    items = grouped if grouped is not None else (raw.get("decisions") or raw.get("claim_decisions") or raw.get("items") or raw.get("claims") or raw.get("boundaries") or [])
+    groups = collect_boundary_groups(raw)
+    summary_limits = _summary_keyed_values(raw, "required_limits_summary")
+    summary_forbidden = _summary_keyed_values(raw, "forbidden_inferences_summary")
+    # 完整对象是底稿：分组摘要只有 decision，覆盖上去会把 required_limits / 来源信息抹掉。
+    items: Any = collect_boundary_objects(raw)
     if not items and isinstance(raw.get("decision"), str):
         # 模型有时把单条决策平铺返回，而不是 {"decisions": [...]}
         items = [dict(raw)]
@@ -915,27 +1031,39 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
         # 平铺形状的兜底只认真正的 claim_id。否则 {"claims_summary": {...}} 这种摘要容器
         # 会被当成一条 claim_id=claims_summary 的决策，凭空造出一条不存在于材料的边界。
         known_claims = set(claim_texts or {})
-        items = {key: value for key, value in raw.items() if not known_claims or key in known_claims}
+        items = {key: value for key, value in raw.items() if key not in BOUNDARY_ENVELOPE_KEYS and (not known_claims or key in known_claims)}
     if isinstance(items, dict):
         items = [{"claim_id": claim_id, **(item if isinstance(item, dict) else {})} for claim_id, item in items.items()]
+    # 只出现在分组里、没有完整对象的 claim：补一条最小对象，也不许把它的决策丢掉。
+    known_ids = {str(it.get("claim_id")) for it in items if isinstance(it, dict) and it.get("claim_id")}
+    for cid, group in groups.items():
+        if cid not in known_ids:
+            items.append({"claim_id": cid, "_from_group": group})
     decisions = []
+    missing_decision_ids: list[str] = []
     for i, item in enumerate(items):
         if not isinstance(item, dict):
             continue
         item = dict(item)
         cid = str(item.get("claim_id") or f"c{i+1}")
+        group = item.pop("_from_group", None) or groups.get(cid) or {}
         refs = item.get("evidence_refs") or item.get("evidence_ids") or []
         # 边界节点经常不回填 evidence_refs：引用关系在理解阶段已经建立，
         # 这里直接从对应 claim 继承，而不是事后判"引用列表为空"把整条任务废掉。
         if not refs and claim_evidence:
             refs = list(claim_evidence.get(cid) or [])
-        decision = str(item.get("decision") or item.get("status") or item.get("verdict") or item.get("usable") or "excluded")
-        if decision in {"allowed", "eligible", "usable_with_limits"}: decision = "limited" if decision == "usable_with_limits" else "usable"
-        if decision not in {"usable", "limited", "excluded"}: decision = "excluded"
+        decision = _boundary_item_decision(item) or _normalize_boundary_decision(group.get("decision"))
+        if decision is None:
+            # 模型对这条 claim 完全没表态。excluded 是保守兜底，但必须留痕：
+            # 静默兜底会让「模型漏答」看起来像「材料真的不可用」，整任务白跑还没人知道。
+            missing_decision_ids.append(cid)
+            decision = "excluded"
         decisions.append(ClaimDecision(
             claim_id=cid, supported_statement=item.get("supported_statement") or item.get("statement") or item.get("text") or (claim_texts or {}).get(str(item.get("claim_id") or f"c{i+1}")),
-            decision=decision, evidence_refs=[str(x) for x in refs], required_limits=[str(x) for x in (item.get("required_limits") or item.get("limits") or [])],
-            forbidden_inferences=[str(x) for x in (item.get("forbidden_inferences") or [])], rule_ids=[str(x) for x in (item.get("rule_ids") or [])], reason=str(item.get("reason") or item.get("rationale") or ""),
+            decision=decision, evidence_refs=[str(x) for x in refs],
+            required_limits=[str(x) for x in (item.get("required_limits") or item.get("limits") or group.get("required_limits") or summary_limits.get(cid) or [])],
+            forbidden_inferences=[str(x) for x in (item.get("forbidden_inferences") or group.get("forbidden_inferences") or summary_forbidden.get(cid) or [])],
+            rule_ids=[str(x) for x in (item.get("rule_ids") or [])], reason=str(item.get("reason") or item.get("rationale") or ""),
             claim_type=_claim_type(item.get("claim_type") or item.get("kind") or item.get("type")),
             evidence_status=_legacy_evidence_status(item.get("evidence_status") or item.get("assertion_decision") or item.get("assertion_judgment")),
             original_source=_source_object(item),
@@ -946,9 +1074,14 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             attribution_required=bool(item.get("attribution_required", item.get("required_source_phrase") or item.get("required_attribution") or (item.get("assertion_decision") == "source_asserted" and item.get("source_decision") in {"identified_official", "identified_relay"}))),
             required_source_phrase=item.get("required_source_phrase") or item.get("required_attribution"),
             source_evidence_refs=[str(x) for x in (item.get("source_evidence_refs") or item.get("source_refs") or [])],
-            verification_required=bool(item.get("verification_required") or item.get("pending_verification")),
+            verification_required=bool(item.get("verification_required") or item.get("pending_verification") or group.get("verification_required")),
         ))
-    units_items = raw.get("unit_decisions") or raw.get("unitDecisions") or []
+    units_items: Any = []
+    for layer in layers:
+        candidate_units = layer.get("unit_decisions") or layer.get("unitDecisions")
+        if candidate_units:
+            units_items = candidate_units
+            break
     if isinstance(units_items, dict):
         # 模型也可能给 {"u1": "limited"}：字符串值是决策本身，不能当成空对象丢掉
         units_items = [{"unit_id": k, **(v if isinstance(v, dict) else {"decision": v})} for k, v in units_items.items()]
@@ -958,10 +1091,7 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
     for i, item in enumerate(units_items):
         if not isinstance(item, dict):
             continue
-        decision = str(item.get("decision") or item.get("status") or item.get("verdict") or "excluded")
-        if decision in {"allowed", "eligible"}: decision = "usable"
-        if decision == "usable_with_limits": decision = "limited"
-        if decision not in {"usable", "limited", "excluded"}: decision = "excluded"
+        decision = _boundary_item_decision(item) or "excluded"
         unit_decisions.append(UnitDecision(
             unit_id=str(item.get("unit_id") or f"u{i+1}"),
             decision=decision,
@@ -971,7 +1101,14 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             required_source_phrase=item.get("required_source_phrase") or item.get("required_attribution"),
             reason=str(item.get("reason") or item.get("rationale") or ""),
         ))
-    return BoundarySet(decisions=decisions, unresolved_issues=raw.get("unresolved_issues", []) if isinstance(raw.get("unresolved_issues", []), list) else [], global_requirements=global_requirements, unit_decisions=unit_decisions)
+    unresolved = raw.get("unresolved_issues") if isinstance(raw.get("unresolved_issues"), list) else []
+    if missing_decision_ids:
+        unresolved = list(unresolved) + [{
+            "code": BOUNDARY_DECISION_MISSING,
+            "claim_ids": sorted(missing_decision_ids),
+            "message": f"模型未对 {len(missing_decision_ids)} 条 claim 给出决策，已按 excluded 兜底并留痕。",
+        }]
+    return BoundarySet(decisions=decisions, unresolved_issues=unresolved, global_requirements=global_requirements, unit_decisions=unit_decisions)
 
 
 REFUTED_EVIDENCE_LIMIT = "外部来源提出反驳但证据不足：不得作为确定事实，须标明存在争议"
@@ -1309,6 +1446,15 @@ _PROHIBITION_MARKERS = ("不得", "不要", "不能", "禁止", "避免", "不�
 # 有正向要求词才说明这条限定"必须写出来"；只说"不得…"的是禁令，靠不写来满足。
 _POSITIVE_LIMIT_MARKERS = ("须", "应", "需", "必须", "务必")
 
+# 「OCR 数据**对应**关系不明确」里的「应」不是「应当」。裸字匹配会把纯禁令读成正向要求，
+# 于是要求标题写出数据口径——而这条限定的本意恰恰是「别把数字对应到行业」。
+_POSITIVE_TOKEN_FALSE_FRIENDS = ("对应", "相应", "适应", "反应", "响应", "应急", "应用", "应对", "供应", "响应")
+
+# 「须作为现场救援描述，不得推断出警过程细节」这类：前半的「须作为…描述」只规定了口吻/定位，
+# 真正要守的是后半的禁令，靠标题不出现该信息来满足。不剥掉这个框架，
+# 「须」会被读成正向要求，标题就必须写出「本条不得推断细节」这种审核话——永远写不出来，候选必死。
+_POSITIVE_FRAME_MARKERS = ("须作为", "须按", "须围绕", "须基于", "须依据", "须遵循", "须依照")
+
 
 def _limit_is_prohibition(limit: Any) -> bool:
     """「ASR含糊，不得补出具体动作细节」这类是禁令，靠标题里不出现该信息来满足。
@@ -1322,6 +1468,10 @@ def _limit_is_prohibition(limit: Any) -> bool:
     if not any(marker in text for marker in _PROHIBITION_MARKERS):
         return False
     # 「须归属为旁白，不得写成史实定论」这类前半是正向要求，仍算需要表达。
+    for word in _POSITIVE_TOKEN_FALSE_FRIENDS:
+        text = text.replace(word, "")
+    for frame in _POSITIVE_FRAME_MARKERS:
+        text = text.replace(frame, "，")
     return not any(marker in text for marker in _POSITIVE_LIMIT_MARKERS)
 
 
@@ -1329,15 +1479,125 @@ def _limit_is_prohibition(limit: Any) -> bool:
 # 混成一个判断就会出现「写了『自述』却因为没写『不』被判缺限定」这类误杀。
 _ATTRIBUTION_LIMIT_TOKENS = ("归属", "信源", "来源", "转述", "自述", "称")
 
+# 「须保留活动名称与地点」里的「名**称**」是名词，不是归属动词。裸 token 匹配会把这类
+# 限定误判成归属类，进而要求标题出现信源——而标题老老实实保留了活动名，本已合规。
+# 对照实验（2026-11-02，compare_v2）里「古力娜扎…星光之夜现场记录」就是这么被判否的。
+_ATTRIBUTION_TOKEN_FALSE_FRIENDS = ("名称", "简称", "称号", "称呼", "称作", "对称", "俗称")
+
 
 def _limit_is_attribution(limit: Any) -> bool:
     text = str(limit or "")
+    for word in _ATTRIBUTION_TOKEN_FALSE_FRIENDS:
+        text = text.replace(word, "")
     return any(token in text for token in _ATTRIBUTION_LIMIT_TOKENS)
+
+
+# 「可写司机昏迷斜靠座椅，但病因须归属」——归属要求只针对「病因」这一个子事实。
+# 标题里根本没提病因，就没有归属义务；把整条限定当标题级要求，等于凭空多一条必死约束。
+_ATTRIBUTION_SCOPED_PATTERN = re.compile(r"[，,；;但而]([^，,；;但而]{2,8})(?:须|应|需)归属")
+
+
+def _limit_attribution_scope_absent(limit: Any, headline: str) -> bool:
+    """归属限定绑定的子事实不在标题里：这条归属要求不适用。"""
+    for match in _ATTRIBUTION_SCOPED_PATTERN.finditer(str(limit or "")):
+        subject = match.group(1).strip()
+        if subject and subject not in headline:
+            return True
+    return False
 
 
 def _limit_needs_body(limit: Any, prefix_labels: Any) -> bool:
     """这条限定是否必须由标题正文表达。"""
-    return not _limit_is_prohibition(limit) and not _limit_covered_by_narration(limit, prefix_labels)
+    if _limit_is_prohibition(limit) or _limit_covered_by_narration(limit, prefix_labels):
+        return False
+    # 归属类永远要表达：它说的就是「把话归给谁」，标题不写就等于把博主说法当成了事实。
+    if _limit_is_attribution(limit):
+        return True
+    return not _is_retention_only_limit(limit)
+
+
+# 「须保留 X」「限定为 X」「须以 X 为准」要求的是「别改写、别夸大」——标题照材料原样
+# 保留就已经满足，机器却要求它把测试条件、未引用的数值口径复述进标题。标题做不到，
+# 于是判定永远缺限定。2026-11-02 对照实验里「央视财经六字解读…」「博主实测Neo12…」
+# 「古力娜扎…星光之夜现场记录」都栽在这里，而人工判定它们是可用的。
+_NON_EXPRESSIVE_LIMIT_MARKERS = ("须保留", "保留为", "须保持", "限定为", "须以", "为准", "不得直接引用")
+
+
+def _is_retention_only_limit(limit: Any) -> bool:
+    """只在「别弄错」层面约束、不要求标题额外写出内容的限定。"""
+    return any(marker in str(limit or "") for marker in _NON_EXPRESSIVE_LIMIT_MARKERS)
+
+
+# 范围/条件类限定是否已落地，过去靠一张全局词表（据/称/可能/不/未…）判断：其中「不」「未」
+# 几乎任何标题都命中，而「据」「称」又是归属词——结果是该拦的没拦、该放的没放。
+# 现在改成「限定文本里的可核对锚点是否出现在标题里」，抽不出锚点就放行交给评审。
+_LIMIT_SCOPE_WORDS = (
+    "上半年", "下半年", "全年", "今年", "去年", "明年", "本季度", "当季", "截至", "以来",
+    "以内", "以上", "以下", "之前", "之后", "期间", "阶段", "部分地区", "部分", "个别",
+    "某些", "特定", "仅限", "背景下", "前提下", "条件下", "范围内", "口径", "版本", "型号",
+)
+_LIMIT_UNCERTAINTY_MARKERS = (
+    "可能", "疑似", "据说", "网传", "尚未", "未经", "约", "左右", "大约", "预计", "或将",
+    "部分", "个别", "有观点认为", "一种说法", "存在争议", "未证实", "未获证实",
+)
+_LIMIT_ANCHOR_FILLER = ("须保留", "须保持", "保留为", "限定为", "须以", "为准", "不得", "必须", "须", "应")
+
+
+def _limit_anchors(limit: Any) -> list[str]:
+    """从限定文本里抽出「标题里应该出现」的可核对锚点：引号词、数字、范围/口径词。"""
+    text = str(limit or "")
+    anchors: list[str] = []
+    for quoted in re.findall(r"[“\"「『]([^”\"」』]{2,20})[”\"」』]", text):
+        anchors.extend(part.strip() for part in re.split(r"[/、，,]", quoted) if part.strip())
+    anchors.extend(re.findall(r"\d+(?:\.\d+)?%?", text))
+    anchors.extend(word for word in _LIMIT_SCOPE_WORDS if word in text)
+    cleaned = []
+    for anchor in anchors:
+        if any(filler in anchor for filler in _LIMIT_ANCHOR_FILLER):
+            continue
+        cleaned.append(anchor)
+    return list(dict.fromkeys(cleaned))
+
+
+# 限定文本说的是哪一类，就该由哪一类表达来满足：
+#   时间/范围类 → 标题要有年份、月份、期间、截至这类时间落点；
+#   不确定性类 → 标题要有「未经证实/传闻/存在争议」这类标记；
+#   条件类     → 标题要有「情况下/前提下/仅/部分」这类范围词；
+#   数值口径类 → 标题要有数字或「约/左右/以上」这类量级词。
+# 把这几类混成一张全局词表，就会出现「写了『据称』却被判缺限定」和「写了『不』就全过」两种错。
+_LIMIT_CATEGORY_RULES = (
+    ("time", ("时间范围", "时间", "范围", "期间", "时长", "日期", "年份", "月份", "季度", "截至"),
+     ("年", "月", "日", "季度", "上半年", "下半年", "至今", "截至", "期间", "以来", "近期", "最新", "当时", "此前")),
+    ("uncertainty", ("未经证实", "未证实", "传闻", "尚未", "未获", "说法", "推测", "未经核实", "存在争议", "尚存疑"),
+     _LIMIT_UNCERTAINTY_MARKERS),
+    ("condition", ("条件", "前提", "背景", "情境", "适用于", "针对"),
+     ("情况下", "前提下", "条件下", "背景下", "如果", "若", "仅", "只", "部分", "个别", "针对", "适用于")),
+    ("quantity", ("口径", "统计", "数据", "样本", "比例", "数值"),
+     ("约", "左右", "近", "超过", "不足", "以上", "以下", "倍", "成")),
+)
+
+
+def _limit_is_expressed(limit: Any, headline: str) -> bool:
+    """范围/条件/不确定性类限定是否已经落进标题正文。
+
+    先按限定语义分类，用该类对应的表达词表判断；认不出类别的才退回锚点比对，
+    锚点也抽不出来时放行——机械判不了的事交给评审，但不能因此放过已知类别。
+    """
+    text = str(limit or "")
+    for name, triggers, markers in _LIMIT_CATEGORY_RULES:
+        if not any(trigger in text for trigger in triggers):
+            continue
+        if any(marker in headline for marker in markers):
+            return True
+        if name in {"time", "quantity"} and re.search(r"\d", headline):
+            return True
+        return False
+    anchors = _limit_anchors(text)
+    if not anchors:
+        return True
+    return any(anchor in headline for anchor in anchors)
+
+
 
 
 def _limit_covered_by_narration(limit: Any, prefix_labels: Any) -> bool:
@@ -1371,9 +1631,25 @@ def _nature_disclosure_applied(state: dict[str, Any]) -> bool:
     return all(s.get("signal_type") in {"simulation", "fictional", "ai_generated"} for s in pending_signals)
 
 
+# 「据」和「称」是单字标记，裸字匹配会把名词读成信源：「数据」「证据」「根据」「名称」
+# 都能让一个没有任何归属的标题被判成"已表达归属"。这个方向的错误是漏放——把博主说法
+# 当成事实放行，比误杀更贵，所以在匹配前先剥掉这些复合词。
+# （2026-11-02 扫过 compare_v2b 全批 40 条，命中 0 条；属于防御性修复，不影响该批结论。）
+_ATTRIBUTION_MARKER_FALSE_FRIENDS = (
+    "数据", "证据", "根据", "依据", "票据", "收据", "单据", "占据",
+    "名称", "简称", "称号", "称呼", "称作", "对称", "俗称", "称重",
+)
+
+
+def _strip_attribution_false_friends(text: str) -> str:
+    for word in _ATTRIBUTION_MARKER_FALSE_FRIENDS:
+        text = text.replace(word, "")
+    return text
+
+
 def _has_explicit_source_relation(headline: str) -> bool:
     """Reject generic source labels such as '通报：' without a relation word."""
-    text = str(headline).strip()
+    text = _strip_attribution_false_friends(str(headline).strip())
     if text.startswith(("通报：", "通报:", "通报称")):
         return False
     if "通报：" in text or "通报:" in text:
@@ -1571,19 +1847,25 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
             and str(getattr(d, "claim_id", "")) in cited
             # 「须归属为旁白/剧情叙述」是载体披露，【剧情演绎】前缀已经写明；
             # 再要求正文重复一次，就与 U-S09 禁止载体元话语直接冲突，形成必死的死锁。
-            and any(_limit_needs_body(x, prefix_labels) for x in (getattr(d, "required_limits", None) or []))
+            # 绑定了具体子事实的归属限定（「但病因须归属」）在标题没提该子事实时也不适用。
+            and any(_limit_needs_body(x, prefix_labels) and not _limit_attribution_scope_absent(x, head_body)
+                    for x in (getattr(d, "required_limits", None) or []))
         ]
         if limited_cited:
-            limit_phrases = ("据", "称", "网传", "疑似", "号称", "报道", "网友", "可能", "部分", "仅", "如果", "只有", "不", "未")
             # 归属类限定走和 G1_SOURCE_ATTRIBUTION_MISSING 同一套判据：真实故障（2026-11-02）
             # 里「黄多多自述：…」「黄多多受访：…」既被判已归属、又被判缺限定——两个检查
             # 各用各的词表，结果一条视频的六个候选全被判否，零交付。
             # 反过来也不能让归属语顶掉范围/条件类限定：那是两件事。
-            limits_flat = [str(x) for d in limited_cited for x in (getattr(d, "required_limits", None) or [])]
+            # 只收「确实需要正文表达」的限定：过去把该 claim 的全部 limits 重新摊进来，
+            # 被上面豁免掉的禁令/保留类限定又回到 needs_other，而禁令永远写不进标题 ⇒ 必死。
+            limits_flat = [
+                str(x) for d in limited_cited for x in (getattr(d, "required_limits", None) or [])
+                if _limit_needs_body(x, prefix_labels) and not _limit_attribution_scope_absent(x, head_body)
+            ]
             needs_attribution = [x for x in limits_flat if _limit_is_attribution(x)]
             needs_other = [x for x in limits_flat if not _limit_is_attribution(x)]
             satisfied = ((not needs_attribution or _has_explicit_source_relation(head_body))
-                         and (not needs_other or any(p in head_body for p in limit_phrases)))
+                         and (not needs_other or all(_limit_is_expressed(x, head_body) for x in needs_other)))
             if not satisfied:
                 codes = "、".join(str(getattr(d, "claim_id", "")) for d in limited_cited)
                 errors.append({"code": "G1_MISSING_LIMIT", "repairable": True, "reason": f"标题引用了需限定的陈述（{codes}），但未表达限定；须在实际正文保留必要范围、条件或可识别信源归属，不能仅自报 qualifiers_used；无法保留时删除该信息"})
@@ -2191,16 +2473,26 @@ class Pipeline:
             claim_text_map = {c.claim_id: c.text for c in understanding.claims}
             claim_evidence_map = {c.claim_id: list(c.evidence_refs) for c in understanding.claims}
             boundary = _normalize_boundary(boundary_raw, claim_text_map, claim_evidence_map)
-            if not boundary.decisions and understanding.claims:
-                # 一条决策都没有、但陈述是有的：这是模型把决策写丢了，不是"真的没有可写内容"。
+            missing_boundary_ids = _missing_boundary_claims(boundary)
+            if (not boundary.decisions or missing_boundary_ids) and understanding.claims:
+                # 两种情况都是模型把决策写丢了，不是"真的没有可写内容"：
+                # 一条决策都没给，或给了部分 claim 却漏掉其余（后者过去被静默兜底成 excluded）。
                 # 直接停机等于白烧一次 20K token 的调用，所以带着"必须逐条表态"的要求再问一次。
-                self.storage.event(task_id, "N05", "boundary_empty_retry", {"claims": len(understanding.claims), "reply_keys": sorted(boundary_raw.keys())[:12]})
+                self.storage.event(task_id, "N05", "boundary_empty_retry", {
+                    "claims": len(understanding.claims),
+                    "received": len(boundary.decisions),
+                    "missing_claim_ids": missing_boundary_ids[:20],
+                    "reply_keys": sorted(boundary_raw.keys())[:12],
+                })
                 boundary_payload = {**boundary_payload, "_previous_output_error": {
-                    "error": f"上一次返回里没有任何 claim 级决策（收到 {len(boundary.decisions)} 条）。",
+                    "error": f"上一次返回里有 {len(missing_boundary_ids)} 条 claim 没有给出 decision（收到 {len(boundary.decisions)} 条决策）。",
                     "instruction": "必须为输入里的每一条 claim 都给出 decision（usable / limited / excluded / verification_required），放在顶层 decisions 或 claims 数组里；不要只给 claims_summary 这类摘要。",
                 }}
                 boundary_raw = self._call(task_id, "N05", "boundary", boundary_payload, "BoundarySet")
                 boundary = _normalize_boundary(boundary_raw, claim_text_map, claim_evidence_map)
+                if _missing_boundary_claims(boundary):
+                    # 二次仍漏答：不再重试，但把漏答记进 state，事后能区分「模型漏答」与「材料不可用」。
+                    state["boundary_missing_decisions"] = _missing_boundary_claims(boundary)
             # 未知 ID 不能按顺序映射为其他陈述，否则会把不同事实的边界串换。
             reference_audit = audit_evidence(understanding, video, boundary)
             state["reference_audit"] = reference_audit

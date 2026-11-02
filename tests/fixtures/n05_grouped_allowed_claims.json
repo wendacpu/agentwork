@@ -1,0 +1,417 @@
+{
+ "_source": {
+  "video_id": "BV1j6JR6AEAh",
+  "task_id": "task-66641e08444f",
+  "node": "N05",
+  "event": "model_reply"
+ },
+ "data": {
+  "allowed_claims": [
+   "c1",
+   "c2",
+   "c4",
+   "c5",
+   "c6"
+  ],
+  "excluded_claims": [
+   "c3",
+   "c7"
+  ],
+  "verification_pending": [
+   "c3",
+   "c7"
+  ],
+  "required_limits_summary": [
+   "c2: 须保留“放慢手法/眼部特写”等具体呈现方式",
+   "c4: 须结合OCR上下文，不得单独作为完整动作描述",
+   "c5: 须保留为作者观点",
+   "c6: 须归属为作者说法"
+  ],
+  "forbidden_inferences_summary": [
+   "不得声称适合所有新手或保证学会",
+   "不得将模型描述当作已核验画面事实",
+   "不得补全未展示的化妆步骤或效果",
+   "不得将观点升级为普遍化妆真理",
+   "不得声称粉底确有养肤功效或适用于所有肤质"
+  ],
+  "attribution_required_claims": [
+   "c6"
+  ],
+  "required_source_phrases": {
+   "c6": "博主称"
+  },
+  "verification_required_claims": [
+   "c3",
+   "c7"
+  ],
+  "rule_ids": [
+   "U-B01",
+   "U-B07c",
+   "U-S02",
+   "U-S04",
+   "U-S07",
+   "V02",
+   "V12",
+   "F01",
+   "C22"
+  ],
+  "claims": [
+   {
+    "claim_id": "c1",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "梦梦爱化妆",
+     "type": "个人创作者"
+    },
+    "transmission_path": [
+     {
+      "actor": "梦梦爱化妆",
+      "step": "发布视频标题与口播"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "梦梦爱化妆",
+      "role": [
+       "source"
+      ]
+     },
+     {
+      "name": "化妆新手",
+      "role": [
+       "audience"
+      ]
+     }
+    ],
+    "decision": "usable",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得声称该妆容适合所有新手或保证学会"
+    ],
+    "rule_ids": [
+     "U-B01",
+     "U-S02",
+     "F01"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": false,
+    "reason": "标题与ASR均指向新手向复古妆容教学，主题一致，可忠实概括。"
+   },
+   {
+    "claim_id": "c2",
+    "claim_type": "source_claim",
+    "evidence_status": "limited",
+    "original_source": {
+     "name": "梦梦爱化妆",
+     "type": "个人创作者"
+    },
+    "transmission_path": [
+     {
+      "actor": "梦梦爱化妆",
+      "step": "口播及画面呈现"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "qualified",
+    "entities": [
+     {
+      "name": "梦梦爱化妆",
+      "role": [
+       "source"
+      ]
+     },
+     {
+      "name": "化妆新手",
+      "role": [
+       "audience"
+      ]
+     }
+    ],
+    "decision": "limited",
+    "required_limits": [
+     "须保留“放慢手法/眼部特写”等具体呈现方式，不得泛化为“超详细教学”"
+    ],
+    "forbidden_inferences": [
+     "不得声称视频包含完整课程或保证新手学会"
+    ],
+    "rule_ids": [
+     "U-B01",
+     "U-S02",
+     "F01"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": false,
+    "reason": "ASR提及“超详细”，caption描述放慢手法和眼部特写，但caption为模型衍生，需限定为具体呈现方式。"
+   },
+   {
+    "claim_id": "c3",
+    "claim_type": "observable",
+    "evidence_status": "unknown",
+    "original_source": {
+     "name": "模型画面描述",
+     "type": "模型衍生"
+    },
+    "transmission_path": [
+     {
+      "actor": "模型描述",
+      "step": "基于未核验帧生成"
+     }
+    ],
+    "temporal_status": "unknown",
+    "assertion_permission": "forbidden",
+    "entities": [
+     {
+      "name": "演示者",
+      "role": [
+       "event_actor"
+      ]
+     }
+    ],
+    "decision": "excluded",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得将模型描述当作已核验画面事实"
+    ],
+    "rule_ids": [
+     "U-B07c",
+     "C22"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": true,
+    "reason": "仅引用模型描述，无ASR/OCR/原题直接支持，C22标记，暂缓核验。"
+   },
+   {
+    "claim_id": "c4",
+    "claim_type": "observable",
+    "evidence_status": "limited",
+    "original_source": {
+     "name": "模型画面描述",
+     "type": "模型衍生"
+    },
+    "transmission_path": [
+     {
+      "actor": "模型描述",
+      "step": "基于未核验帧生成"
+     }
+    ],
+    "temporal_status": "unknown",
+    "assertion_permission": "qualified",
+    "entities": [
+     {
+      "name": "演示者",
+      "role": [
+       "event_actor"
+      ]
+     }
+    ],
+    "decision": "limited",
+    "required_limits": [
+     "须结合OCR“圆圆的无辜的眼睛很关键”上下文，不得单独作为完整动作描述"
+    ],
+    "forbidden_inferences": [
+     "不得补全未展示的化妆步骤或效果"
+    ],
+    "rule_ids": [
+     "U-B07c",
+     "U-S04"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": false,
+    "reason": "OCR碎片与描述呼应，但OCR截断，需限定使用。"
+   },
+   {
+    "claim_id": "c5",
+    "claim_type": "source_claim",
+    "evidence_status": "limited",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "视频内文字"
+    },
+    "transmission_path": [
+     {
+      "actor": "OCR识别",
+      "step": "从画面提取"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "qualified",
+    "entities": [
+     {
+      "name": "视频作者",
+      "role": [
+       "source"
+      ]
+     }
+    ],
+    "decision": "limited",
+    "required_limits": [
+     "须保留“圆圆的无辜的眼睛很关键”为作者观点，不得作为客观事实"
+    ],
+    "forbidden_inferences": [
+     "不得将观点升级为普遍化妆真理"
+    ],
+    "rule_ids": [
+     "U-S02",
+     "U-B04"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": false,
+    "reason": "OCR碎片可读，但属作者观点，需限定。"
+   },
+   {
+    "claim_id": "c6",
+    "claim_type": "source_claim",
+    "evidence_status": "limited",
+    "original_source": {
+     "name": "梦梦爱化妆",
+     "type": "个人创作者"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字及口播",
+      "step": "作者宣称"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "梦梦爱化妆",
+      "role": [
+       "source"
+      ]
+     },
+     {
+      "name": "粉底",
+      "role": [
+       "product"
+      ]
+     }
+    ],
+    "decision": "limited",
+    "required_limits": [
+     "须归属为作者说法，不得写成产品客观功效"
+    ],
+    "forbidden_inferences": [
+     "不得声称粉底确有养肤功效或适用于所有肤质"
+    ],
+    "rule_ids": [
+     "U-S02",
+     "V12",
+     "U-S07"
+    ],
+    "attribution_required": true,
+    "required_source_phrase": "博主称",
+    "verification_required": false,
+    "reason": "OCR出现“化妆边养肤”，caption亦提及属作者说法，需归属。"
+   },
+   {
+    "claim_id": "c7",
+    "claim_type": "observable",
+    "evidence_status": "unknown",
+    "original_source": {
+     "name": "模型画面描述",
+     "type": "模型衍生"
+    },
+    "transmission_path": [
+     {
+      "actor": "模型描述",
+      "step": "基于未核验帧生成"
+     }
+    ],
+    "temporal_status": "unknown",
+    "assertion_permission": "forbidden",
+    "entities": [
+     {
+      "name": "演示者",
+      "role": [
+       "event_actor"
+      ]
+     }
+    ],
+    "decision": "excluded",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得将模型描述当作已核验画面事实"
+    ],
+    "rule_ids": [
+     "U-B07c",
+     "C22"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "verification_required": true,
+    "reason": "仅引用模型描述，无ASR/OCR/原题直接支持，C22标记，暂缓核验。"
+   }
+  ],
+  "semantic_units": [
+   {
+    "unit_id": "u1",
+    "decision": "usable",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得声称适合所有新手或保证学会"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "标题与ASR支持新手向复古妆容教学，可忠实概括。"
+   },
+   {
+    "unit_id": "u2",
+    "decision": "excluded",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得将模型描述当作已核验画面事实"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "依赖c3，c3因C22暂缓核验，本单元排除。"
+   },
+   {
+    "unit_id": "u3",
+    "decision": "limited",
+    "required_limits": [
+     "须保留“圆圆的无辜的眼睛很关键”为作者观点，不得作为客观事实"
+    ],
+    "forbidden_inferences": [
+     "不得补全未展示的化妆步骤或效果"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "OCR碎片与描述呼应，但需限定为作者观点。"
+   },
+   {
+    "unit_id": "u4",
+    "decision": "limited",
+    "required_limits": [
+     "须归属为作者说法，不得写成产品客观功效"
+    ],
+    "forbidden_inferences": [
+     "不得声称粉底确有养肤功效或适用于所有肤质"
+    ],
+    "attribution_required": true,
+    "required_source_phrase": "博主称",
+    "reason": "作者宣称养肤功效，需归属。"
+   },
+   {
+    "unit_id": "u5",
+    "decision": "excluded",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得将模型描述当作已核验画面事实"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "依赖c7，c7因C22暂缓核验，本单元排除。"
+   }
+  ]
+ }
+}

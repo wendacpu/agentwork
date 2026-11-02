@@ -1,0 +1,449 @@
+{
+ "_source": {
+  "video_id": "BV13ZHT6AEYW",
+  "task_id": "task-855db39293cf",
+  "node": "N05",
+  "event": "model_reply"
+ },
+ "data": {
+  "type": "json_object",
+  "claims": [
+   {
+    "claim_id": "c1",
+    "text": "视频以今天的世界地图作为板块漂移历史的起点。",
+    "claim_type": "observable",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "世界地图",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c2",
+    "text": "视频主题为地球板块漂移历史。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频标题",
+     "type": "video_title"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频标题直接陈述"
+     }
+    ],
+    "temporal_status": "unknown",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "地球板块",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c3",
+    "text": "视频标注寒武纪生命大爆发发生在约5.1亿年前。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "寒武纪生命大爆发",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c4",
+    "text": "视频标注冈瓦纳古陆存在于约3.9亿年前。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "冈瓦纳古陆",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c5",
+    "text": "视频标注约3亿年前大陆再次合体。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "大陆",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c6",
+    "text": "视频标注盘古大陆裂开、大西洋诞生。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "盘古大陆",
+      "role": "event_actor"
+     },
+     {
+      "name": "大西洋",
+      "role": "affected_party"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c7",
+    "text": "视频时间轴出现6600万年前节点。",
+    "claim_type": "observable",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "6600万年前",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c8",
+    "text": "视频时间轴出现200万年前节点。",
+    "claim_type": "observable",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "200万年前",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c9",
+    "text": "视频时间轴出现100万年前节点。",
+    "claim_type": "observable",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "direct",
+    "entities": [
+     {
+      "name": "100万年前",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c10",
+    "text": "视频提到地球曾经历冰川推进到赤道、冻成『雪球』的时期。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "historical",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "地球",
+      "role": "event_actor"
+     },
+     {
+      "name": "冰川",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c11",
+    "text": "视频提到澳大利亚撞上亚洲。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "dynamic",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "澳大利亚",
+      "role": "event_actor"
+     },
+     {
+      "name": "亚洲",
+      "role": "affected_party"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c12",
+    "text": "视频总结大陆聚了又散。",
+    "claim_type": "source_claim",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "unknown",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "大陆",
+      "role": "event_actor"
+     }
+    ],
+    "verification_required": false
+   },
+   {
+    "claim_id": "c13",
+    "text": "视频表达人类恰好活在板块分开的这一瞬。",
+    "claim_type": "opinion",
+    "evidence_status": "supported",
+    "original_source": {
+     "name": "视频画面文字",
+     "type": "video_ocr"
+    },
+    "transmission_path": [
+     {
+      "actor": "视频画面文字直接呈现"
+     }
+    ],
+    "temporal_status": "current",
+    "assertion_permission": "attributed",
+    "entities": [
+     {
+      "name": "人类",
+      "role": "affected_party"
+     }
+    ],
+    "verification_required": false
+   }
+  ],
+  "semantic_units": [
+   {
+    "unit_id": "u1",
+    "decision": "usable",
+    "required_limits": [],
+    "forbidden_inferences": [
+     "不得推断视频提供了超出板块漂移历史之外的地质学完整课程"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "标题与 OCR 均支持以世界地图为起点展示板块漂移历史，属视频主题概括，无需额外归属。"
+   },
+   {
+    "unit_id": "u2",
+    "decision": "limited",
+    "required_limits": [
+     "须保留『约』及对应年代数字，不得把 OCR 截断的节点补成具体事件",
+     "200万年前、100万年前等仅出现数字的节点不得单独作为可写看点"
+    ],
+    "forbidden_inferences": [
+     "不得把时间轴节点补全为视频未明确的事件内容",
+     "不得把约5.1亿年前等年代写成精确断言"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "OCR 片段可读但存在截断与噪声，年代节点须保留约数限定，未明确事件的节点不能补全。"
+   },
+   {
+    "unit_id": "u3",
+    "decision": "limited",
+    "required_limits": [
+     "须保留『曾经历』的过去时态，不得写成当前状态",
+     "须保留『雪球』引号或说明为比喻"
+    ],
+    "forbidden_inferences": [
+     "不得推断雪球事件的具体年代或成因"
+    ],
+    "attribution_required": false,
+    "required_source_phrase": "",
+    "reason": "OCR 明确出现雪球事件但未标注年代，须保留历史时态与比喻限定。"
+   },
+   {
+    "unit_id": "u4",
+    "decision": "limited",
+    "required_limits": [
+     "须保留『视频提到』或归属为作者/视频观点，不得写成已发生事实",
+     "不得补出撞击时间或结果"
+    ],
+    "forbidden_inferences": [
+     "不得把澳大利亚撞上亚洲写成已发生的现实事件或确定预测"
+    ],
+    "attribution_required": true,
+    "required_source_phrase": "博主称",
+    "reason": "OCR 出现该说法但未标注时间，可能为未来预测或动画演示，须归属为博主说法。"
+   },
+   {
+    "unit_id": "u5",
+    "decision": "limited",
+    "required_limits": [
+     "须归属为博主观点，不得写成系统确认的普遍规律"
+    ],
+    "forbidden_inferences": [
+     "不得把『人类恰好活在分开这一瞬』写成科学定论"
+    ],
+    "attribution_required": true,
+    "required_source_phrase": "博主称",
+    "reason": "结尾总结属作者观点表达，须保留真实信源归属。"
+   }
+  ],
+  "boundary_set": {
+   "video_id": "BV13ZHT6AEYW",
+   "overall_decision": "limited",
+   "usable_claims": [
+    "c1",
+    "c2",
+    "c3",
+    "c4",
+    "c5",
+    "c6",
+    "c7",
+    "c8",
+    "c9",
+    "c10",
+    "c12"
+   ],
+   "limited_claims": [
+    "c11",
+    "c13"
+   ],
+   "excluded_claims": [],
+   "verification_required": false,
+   "attribution_required": true,
+   "required_source_phrase": "博主称",
+   "forbidden_inferences": [
+    "不得把 OCR 截断节点补全为视频未明确的事件",
+    "不得把约数年代写成精确断言",
+    "不得把澳大利亚撞上亚洲写成已发生事实",
+    "不得把博主观点写成科学定论"
+   ],
+   "rule_ids": [
+    "U-B01",
+    "U-B03",
+    "U-B07c",
+    "U-S02",
+    "U-S07",
+    "U-S08",
+    "U-S10",
+    "V16",
+    "F02"
+   ],
+   "notes": "视频为知识科普讲解分享，OCR 为主要文字证据，存在截断与噪声；年代节点须保留约数限定，观点与未标注时间的说法须归属为博主。"
+  }
+ }
+}
