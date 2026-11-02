@@ -7,13 +7,16 @@ import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
 class ModelError(RuntimeError):
-    def __init__(self, message: str, retryable: bool = True) -> None:
+    def __init__(self, message: str, retryable: bool = True, raw: str = "") -> None:
         super().__init__(message)
         self.retryable = retryable
+        # 解析失败时保留模型原始输出：没有它就无法判断是截断、未转义引号还是结构缺失。
+        self.raw = raw
 
 
 @dataclass
@@ -28,6 +31,125 @@ class ModelReply:
 
 class ModelAdapter(Protocol):
     def complete(self, *, task: str, system: str, user: dict[str, Any], schema: str, attempt: int = 0) -> ModelReply: ...
+
+
+def _close_truncated(body: str) -> str:
+    """尽力修复被 max_tokens 截断的 JSON：补齐未闭合的字符串/对象/数组。
+    只做结构补齐，不改内容；修不好仍由上层重试。"""
+    out = body.rstrip()
+    in_str = False
+    esc = False
+    stack: list[str] = []
+    for ch in out:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch in "{[":
+                stack.append(ch)
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+    if in_str:
+        out += '"'
+    out = out.rstrip()
+    if out.endswith(":"):
+        # 截断常停在键的冒号后（模型的 {"subject":）：补 null 而不是删掉冒号，
+        # 删掉会得到 {"subject"}，怎么补都无法解析。
+        out += " null"
+    elif out.endswith(","):
+        out = out[:-1]
+    out += "".join("}" if c == "{" else "]" for c in reversed(stack))
+    return out
+
+
+def _escape_stray_quotes(body: str) -> str:
+    """把字符串值内部未转义的 ASCII 双引号转义掉。
+
+    中文材料里模型常直接写 他说"我不同意" 这种内嵌引号，JSON 就此截断在那一处，
+    报错永远是「Expecting ',' delimiter」，位置却离真正坏点很远。
+    规则：字符串内部遇到的 " ，只有后面紧跟 , : } ] 或文本结束时才算收尾，否则是内嵌引号。
+    """
+    out: list[str] = []
+    in_str = False
+    esc = False
+    index = 0
+    length = len(body)
+    while index < length:
+        ch = body[index]
+        if not in_str:
+            out.append(ch)
+            if ch == '"':
+                in_str = True
+            index += 1
+            continue
+        if esc:
+            out.append(ch)
+            esc = False
+            index += 1
+            continue
+        if ch == "\\":
+            out.append(ch)
+            esc = True
+            index += 1
+            continue
+        if ch == '"':
+            look = index + 1
+            while look < length and body[look] in " \t\r\n":
+                look += 1
+            if look >= length or body[look] in ",:}]":
+                out.append(ch)
+                in_str = False
+            else:
+                out.append('\\"')
+            index += 1
+            continue
+        out.append(ch)
+        index += 1
+    return "".join(out)
+
+
+# 模型偶尔把结构化输出再包一层信封返回：{"type":"json_object","content":{...}}，
+# 或者按 schema 名包一层：{"BoundarySet": {...}}。这层信封对下游毫无意义，
+# 不拆掉就会得到「理解节点 0 条 claim」「边界 0 条判定」这种静默零输出。
+_ENVELOPE_KEYS = {"type", "content", "data", "result", "response", "output", "json", "schema", "json_object"}
+_SCHEMA_WRAPPERS = {"understanding", "boundaryset", "highlightset", "reviewresult", "reviewresultbatch",
+                    "generationresult", "candidatebatch", "thesisreview", "verificationresult"}
+
+
+def _unwrap_envelope(data: Any, depth: int = 0) -> Any:
+    if not isinstance(data, dict) or depth > 4:
+        return data
+    kind = data.get("type")
+    if isinstance(kind, str) and kind.lower() == "json_object":
+        inner = data.get("content", data.get("data"))
+        if isinstance(inner, str):
+            try:
+                return _unwrap_envelope(loads_json_loose(inner), depth + 1)
+            except json.JSONDecodeError:
+                return data
+        if isinstance(inner, dict):
+            return _unwrap_envelope(inner, depth + 1)
+    for key, value in data.items():
+        if str(key).lower() in _SCHEMA_WRAPPERS and isinstance(value, dict):
+            merged = dict(value)
+            # 顶层若带同名非空数组，保留它（模型有时把数组放在信封层）
+            for array_key in ("claims", "semantic_units", "decisions", "highlights", "candidates", "reviews"):
+                if not merged.get(array_key) and isinstance(data.get(array_key), list) and data[array_key]:
+                    merged[array_key] = data[array_key]
+            return _unwrap_envelope(merged, depth + 1)
+    rest = {k: v for k, v in data.items() if k not in _ENVELOPE_KEYS}
+    if len(rest) == 1:
+        only = next(iter(rest.values()))
+        if isinstance(only, dict):
+            return _unwrap_envelope(only, depth + 1)
+    return data
 
 
 def loads_json_loose(text: str) -> Any:
@@ -55,6 +177,26 @@ def loads_json_loose(text: str) -> Any:
     repaired = re.sub(r",(\s*[}\]])", r"\1", body)
     try:
         return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+    # 内嵌未转义引号：中文材料里最常见的一种坏法，报错位置通常不在坏点上。
+    quoted = _escape_stray_quotes(repaired)
+    try:
+        return json.loads(quoted)
+    except json.JSONDecodeError:
+        pass
+    # 输出被 max_tokens 截断时，rfind("}") 会把正文截在最后一个完整对象处，丢掉尾部对象；
+    # 所以先用「完整原文」补齐（保留尾部字段），失败才退回被截短的 body。
+    try:
+        return json.loads(_close_truncated(raw))
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_close_truncated(repaired))
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_close_truncated(quoted))
     except json.JSONDecodeError as exc:
         pos = getattr(exc, "pos", 0) or 0
         snippet = body[max(0, pos - 60):pos + 60]
@@ -70,9 +212,10 @@ class MockAdapter:
         evidence_ids = [x.get("evidence_id") for x in (video.get("evidence") or user.get("evidence", [])) if x.get("evidence_id")]
         claims = user.get("claims", [])
         if task == "understand":
-            text = video.get("description") or title
+            # 离线样例只引用原题时，陈述也必须来自原题，不能拿衍生描述冒充。
+            text = title
             claims = [{"claim_id": "c1", "text": text[:100], "kind": "observation", "evidence_refs": evidence_ids[:1], "time_refs": []}]
-            semantic_units = [{"unit_id": "u1", "meaning": text[:100], "kind": "support", "claim_ids": ["c1"], "evidence_ids": evidence_ids[:1], "time_range": None, "role_in_video": "主旨", "grounding": "grounded", "corroboration": {"status": "consistent", "notes": "离线演示", "evidence_ids": evidence_ids[:1]}}]
+            semantic_units = [{"unit_id": "u1", "meaning": text[:100], "kind": "support", "claim_ids": ["c1"], "evidence_ids": evidence_ids[:1], "time_range": None, "role_in_video": "主旨", "semantic_use": "content_summary", "grounding": "grounded", "corroboration": {"status": "consistent", "notes": "离线演示", "evidence_ids": evidence_ids[:1]}}]
             events = [{"event_id": "e1", "actor": "一方", "action": text[:40], "when": "现场", "evidence_ids": evidence_ids[:1], "confidence": "grounded"}]
             data = {"main_format": video.get("format", "未知"), "attributes": [video.get("domain", {}).get("一级", "未知")], "claims": claims, "semantic_units": semantic_units, "events": events, "turns": [], "event_times": [], "extracted_sources": [], "conflicts": []}
         elif task == "boundary":
@@ -92,8 +235,14 @@ class MockAdapter:
                 "selection_reason": "离线临时看点提炼",
                 "unit_id": (semantic_units[i].get("unit_id") if i < len(semantic_units) else ""),
                 "hook_type": hook_types[i % len(hook_types)],
+                "relation": "core" if i == 0 else "support",
+                "thesis_id": "t1",
             } for i, d in enumerate(decisions[:3])]
-            data = {"highlights": highlights, "eliminated": [], "unusable_angles": []}
+            first_unit = semantic_units[0].get("unit_id") if semantic_units else ""
+            thesis_contract = {"thesis_id": "t1", "topic": str(title)[:40], "delivery_type": "展示", "core_promise": "了解视频中的具体看点", "required_semantics": [str(title)[:20] or "视频内容"], "core_unit_ids": [first_unit] if first_unit else ["u1"], "evidence_ids": evidence_ids[:1], "qualifiers": [], "pending_questions": []}
+            data = {"highlights": highlights, "eliminated": [], "unusable_angles": [], "thesis_contract": thesis_contract}
+        elif task == "thesis_review":
+            data = {"thesis_contract": {"thesis_id": "t1", "topic": str(title)[:40], "delivery_type": "展示", "core_promise": "了解视频中的具体看点", "required_semantics": [str(title)[:20] or "视频内容"], "core_unit_ids": [], "evidence_ids": evidence_ids[:1], "qualifiers": [], "pending_questions": []}}
         elif task in {"generate", "rewrite"}:
             highlights = user.get("highlights", [{"highlight_id": "h1", "value": title}])
             base = (highlights[0].get("value") if highlights else title) or title
@@ -101,12 +250,21 @@ class MockAdapter:
             # 遵守正文预算：平台前缀（剧情演绎/AI生成）会占用 max_chars 的一部分
             budget = int((user.get("display_config") or {}).get("max_chars_body") or 20)
             candidates = []
+            slots = ["source_rewrite", "core_summary", "core_hook"]
             for i in range(count):
                 h = highlights[i % max(len(highlights), 1)] if highlights else {"highlight_id": "h1", "value": title}
                 strategies = ["直接描述", "问题方法", "前后变化"]
-                tail = strategies[i % 3]
+                # 重写必须真的换个说法：早期实现固定用 strategies[0]，输出与首轮第一条
+                # 逐字相同。判重逻辑上线后那种输出会被正确识别成"没有新标题"直接停，
+                # 于是所有依赖"重写产生了候选"的测试都失去了可观察对象。
+                # 按父候选 + 轮次区分，保证每条父候选的重写结果互不相同，也不撞首轮三条。
+                if task == "rewrite":
+                    parent_tail = str(user.get("parent_candidate_id") or "").rsplit("-", 1)[-1] or "1"
+                    tail = "问题" + str(max(1, int(user.get("rewrite_round", 0) or 1))) + parent_tail
+                else:
+                    tail = strategies[i % 3]
                 head = (str(h.get("value", base))[: max(0, budget - len(tail))] + tail)[:budget]
-                candidates.append({"candidate_id": f"a{int(user.get('rewrite_round', 0))+1}-{i+1}", "headline": head, "highlight_id": h.get("highlight_id", "h1"), "unit_id": h.get("unit_id", ""), "claim_ids": [c.get("claim_id", "c1") for c in claims[:1]], "evidence_ids": h.get("evidence_ids") or h.get("delivery_evidence_refs", []), "expression_strategy": strategies[i % 3], "qualifiers_used": [], "used_case_ids": [], "generation_round": user.get("rewrite_round", 0), "parent_candidate_id": user.get("parent_candidate_id"), "change_reason": "离线演示" if task == "rewrite" else ""})
+                candidates.append({"candidate_id": f"a{int(user.get('rewrite_round', 0))+1}-{i+1}", "headline": head, "highlight_id": h.get("highlight_id", "h1"), "unit_id": h.get("unit_id", ""), "claim_ids": [c.get("claim_id", "c1") for c in claims[:1]], "evidence_ids": h.get("evidence_ids") or h.get("delivery_evidence_refs", []), "expression_strategy": strategies[i % 3], "qualifiers_used": [], "used_case_ids": [], "generation_round": user.get("rewrite_round", 0), "parent_candidate_id": user.get("parent_candidate_id"), "change_reason": "离线演示" if task == "rewrite" else "", "slot_id": (user.get("parent_slot_id") if task == "rewrite" else slots[i % len(slots)]), "thesis_id": (user.get("parent_thesis_id") if task == "rewrite" else "t1")})
             data = {"candidates": candidates, "memory_trace": [], "shortfall_reason": None}
         elif task == "review":
             candidates = user.get("candidate_titles", [])
@@ -120,13 +278,25 @@ class MockAdapter:
                     "gates": {
                         "G1": {"status": "pass", "reason": "离线临时评审", "evidence_ids": evidence_ids[:1], "rule_ids": []},
                         "G2": {"status": "pass", "reason": "离线临时评审（未触发禁止项）", "evidence_ids": [], "rule_ids": policy_rules[:1]},
-                        "G3": {"status": "pass", "reason": "离线临时评审", "evidence_ids": evidence_ids[:1], "rule_ids": []},
+                        "G3": {"status": "pass", "reason": "离线临时评审", "evidence_ids": evidence_ids[:1], "rule_ids": [], "delivery_supported": True, "core_covered": True},
                     },
                     "quality": {quality: {"score": 2, "reason": "离线临时评审"} for quality in ("Q1", "Q2", "Q3")},
                     "issues": [], "rewrite_guidance": {"preserve": [], "modify": [], "forbidden": []},
                     "memory_query": {"problem_types": [], "query": ""},
                 })
             data = {"reviews": reviews, "rubric_version": "red-dot-review-v2-uncalibrated"}
+        elif task == "baseline_generate":
+            video = user.get("video", {}) or {}
+            base = str(video.get("title") or "视频内容")[:18]
+            data = {"title": base}
+        elif task == "model_review":
+            title = str(user.get("title") or "")
+            ok = len(title) <= 20 and "?" not in title and "？" not in title
+            data = {"verdict": "可用" if ok else "不可用", "reason": "离线 mock 评审：长度与问号检查"}
+        elif task == "baseline_audit":
+            title = str(user.get("title") or "")
+            ok = len(title) <= 20 and "?" not in title and "？" not in title
+            data = {"pass": ok, "reason": "离线 mock 审核：长度与问号检查"}
         elif task == "verify":
             # 离线适配器没有真实核查能力：一律返回 unverifiable，绝不凭空编造反驳证据。
             claim = user.get("claim", {})
@@ -142,6 +312,20 @@ class MockAdapter:
         return ModelReply("ok", data, json.dumps(data, ensure_ascii=False), {"prompt_tokens": 0, "completion_tokens": 0}, int((time.monotonic() - start) * 1000))
 
 
+def _dump_bad_output(task: str, attempt: int, text: str) -> None:
+    """把解析失败的原始输出落盘，否则只能说"大概是引号问题"，永远定位不到真坏点。
+
+    只写 runtime/ 下的调试文件，不参与任何判定；写不进去也不影响主流程。
+    """
+    try:
+        target = Path("runtime") / "model_debug"
+        target.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        (target / f"{stamp}_{task}_a{attempt}.txt").write_text(text or "", encoding="utf-8")
+    except Exception:
+        pass
+
+
 class OpenAICompatibleAdapter:
     def __init__(self, base_url: str, api_key_env: str, model: str, timeout: int = 300, reasoning_effort: str = "") -> None:
         self.base_url = base_url.rstrip("/")
@@ -154,7 +338,9 @@ class OpenAICompatibleAdapter:
         key = os.getenv(self.api_key_env)
         if not key:
             raise ModelError(f"missing API key environment variable: {self.api_key_env}", retryable=False)
-        payload = {"model": self.model, "temperature": 0.2, "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], "response_format": {"type": "json_object"}}
+        # 评审要给三个候选各出 3 门 + 3 个质量分的理由，8192 会在中文长理由下被截断；
+        # max_tokens 只是上限，不写满不额外计费，所以放宽到 16384。
+        payload = {"model": self.model, "temperature": 0.2, "max_tokens": 16384, "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], "response_format": {"type": "json_object"}}
         if self.reasoning_effort == "off":
             # DeepSeek V4.1 默认开思考；关掉可把单节点从 ~68s 压到十几秒，代价是推理质量下降
             payload["thinking"] = {"type": "disabled"}
@@ -166,12 +352,20 @@ class OpenAICompatibleAdapter:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 body = json.loads(response.read().decode())
             text = body["choices"][0]["message"]["content"]
-            return ModelReply("ok", loads_json_loose(text), text, body.get("usage"), int((time.monotonic() - start) * 1000))
+            try:
+                data = _unwrap_envelope(loads_json_loose(text))
+            except json.JSONDecodeError as exc:
+                _dump_bad_output(task, attempt, text)
+                raise ModelError(str(exc), retryable=True, raw=text) from exc
+            return ModelReply("ok", data, text, body.get("usage"), int((time.monotonic() - start) * 1000))
         except urllib.error.HTTPError as exc:
             # Authentication, request-shape and payment/quota failures do not
             # improve by repeating the same call. Network/server failures do.
             retryable = exc.code not in {400, 401, 402, 403, 404, 422}
             raise ModelError(f"HTTP {exc.code}: {exc.reason}", retryable=retryable) from exc
+        except ModelError:
+            # 解析失败已经带了 raw，再包一层会把断点原文弄丢，重试就没法把错误回给模型。
+            raise
         except Exception as exc:
             raise ModelError(str(exc), retryable=True) from exc
 
