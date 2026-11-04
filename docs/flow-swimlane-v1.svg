@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1150" viewBox="0 0 1800 1150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3370FF"/>
+    </marker>
+    <marker id="ar-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF8800"/>
+    </marker>
+    <marker id="ar-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#34C724"/>
+    </marker>
+  </defs>
+
+  <rect width="1800" height="1150" fill="#FFFFFF"/>
+
+  <text x="40" y="44" font-size="25" font-weight="700" fill="#1F2329">短视频推荐文案质量优化 Agent · 流程泳道图</text>
+  <text x="40" y="70" font-size="12.5" fill="#8F959E">蓝色实线 = 主链　橙色虚线 = 人工介入　橙色实线 = 重写循环　绿色虚线 = 长期回流　⚠ = 容易被忽略的关键约束</text>
+
+  <!-- 泳道 -->
+  <g>
+    <rect x="20" y="90" width="1760" height="90" rx="8" fill="#FFFBF0"/>
+    <rect x="20" y="200" width="1760" height="240" rx="8" fill="#F4F8FF"/>
+    <rect x="20" y="480" width="1760" height="140" rx="8" fill="#F7F8FA"/>
+    <rect x="20" y="630" width="1760" height="150" rx="8" fill="#FFF7F0"/>
+    <rect x="20" y="800" width="1760" height="130" rx="8" fill="#F8F5FF"/>
+    <rect x="20" y="950" width="1760" height="140" rx="8" fill="#F2FBF5"/>
+  </g>
+  <g font-size="15" font-weight="700" fill="#646A73">
+    <text x="38" y="140">业务层</text>
+    <text x="38" y="325">Agent / LLM</text>
+    <text x="38" y="550" fill="#8F959E">Workflow</text>
+    <text x="38" y="710" fill="#B86E00">人工层</text>
+    <text x="38" y="870" fill="#7B61FF">工具 / 资源</text>
+    <text x="38" y="1025" fill="#1F8A3B">日志 / 资产</text>
+  </g>
+
+  <!-- 图例 -->
+  <g font-size="12" fill="#646A73">
+    <rect x="820" y="112" width="14" height="14" rx="3" fill="#DCE8FF" stroke="#3370FF"/>
+    <text x="842" y="124">Agent（LLM 判断）</text>
+    <rect x="1010" y="112" width="14" height="14" rx="3" fill="#EEF0F2" stroke="#8F959E"/>
+    <text x="1032" y="124">Workflow（程序）</text>
+    <rect x="1210" y="112" width="14" height="14" rx="3" fill="#FFE7CC" stroke="#FF8800"/>
+    <text x="1232" y="124">人工</text>
+    <rect x="820" y="146" width="14" height="14" rx="3" fill="#FFF3C4" stroke="#E8B400"/>
+    <text x="842" y="158">业务输入</text>
+    <rect x="1010" y="146" width="14" height="14" rx="3" fill="#EFE9FF" stroke="#7B61FF"/>
+    <text x="1032" y="158">工具 / 资源</text>
+    <rect x="1210" y="146" width="14" height="14" rx="3" fill="#DFF5E6" stroke="#34C724"/>
+    <text x="1232" y="158">日志 / 资产</text>
+  </g>
+
+  <!-- 业务层 -->
+  <g>
+    <rect x="180" y="107" width="130" height="56" rx="10" fill="#FFF3C4" stroke="#E8B400" stroke-width="1.5"/>
+    <text x="245" y="131" font-size="13.5" font-weight="700" fill="#7A5C00" text-anchor="middle">视频素材</text>
+    <text x="245" y="149" font-size="10.5" fill="#9C7A1A" text-anchor="middle">标题/字幕/画面文字</text>
+
+    <rect x="340" y="107" width="190" height="56" rx="10" fill="#FFF3C4" stroke="#E8B400" stroke-width="1.5"/>
+    <text x="435" y="131" font-size="13.5" font-weight="700" fill="#7A5C00" text-anchor="middle">业务政策 P1–P9（已批准）</text>
+    <text x="435" y="149" font-size="10.5" fill="#9C7A1A" text-anchor="middle">每条规则带处置动作</text>
+
+    <rect x="560" y="107" width="190" height="56" rx="10" fill="#FFF3C4" stroke="#E8B400" stroke-width="1.5"/>
+    <text x="655" y="131" font-size="13.5" font-weight="700" fill="#7A5C00" text-anchor="middle">验收口径 · 三档标准</text>
+    <text x="655" y="149" font-size="10.5" fill="#9C7A1A" text-anchor="middle">可用 / 勉强通过 / 不可用</text>
+  </g>
+
+  <!-- Agent 层 -->
+  <g>
+    <rect x="460" y="225" width="185" height="195" rx="12" fill="#DCE8FF" stroke="#3370FF" stroke-width="2"/>
+    <text x="552" y="249" font-size="14" font-weight="700" fill="#1A4FCC" text-anchor="middle">Agent 1</text>
+    <text x="552" y="267" font-size="12" fill="#3370FF" text-anchor="middle">理解与边界</text>
+    <line x1="478" y1="279" x2="627" y2="279" stroke="#A8C4FF"/>
+    <text x="478" y="300" font-size="12" fill="#1F2329">① 理解</text>
+    <text x="478" y="315" font-size="10" fill="#8F959E">读出陈述 · 事件线</text>
+    <text x="478" y="342" font-size="12" fill="#1F2329">② 核查</text>
+    <text x="478" y="357" font-size="10" fill="#F54A45">⚠ 默认关闭</text>
+    <text x="478" y="384" font-size="12" fill="#1F2329">③ 边界</text>
+    <text x="478" y="399" font-size="10" fill="#8F959E">可写 / 须限定 / 排除</text>
+  </g>
+  <g>
+    <rect x="690" y="225" width="185" height="195" rx="12" fill="#DCE8FF" stroke="#3370FF" stroke-width="2"/>
+    <text x="782" y="249" font-size="14" font-weight="700" fill="#1A4FCC" text-anchor="middle">Agent 2</text>
+    <text x="782" y="267" font-size="12" fill="#3370FF" text-anchor="middle">主旨</text>
+    <line x1="708" y1="279" x2="857" y2="279" stroke="#A8C4FF"/>
+    <text x="708" y="300" font-size="12" fill="#1F2329">① 出主旨卡</text>
+    <text x="708" y="315" font-size="10" fill="#8F959E">选主看点 · 定主线</text>
+    <text x="708" y="342" font-size="12" fill="#1F2329">② 独立复核</text>
+    <text x="708" y="357" font-size="10" fill="#F54A45">⚠ 看不到 ① 的输出</text>
+    <text x="708" y="384" font-size="12" fill="#1F2329">③ 裁判</text>
+    <text x="708" y="399" font-size="10" fill="#8F959E">互斥 → 转人工</text>
+  </g>
+  <g>
+    <rect x="920" y="265" width="170" height="120" rx="12" fill="#DCE8FF" stroke="#3370FF" stroke-width="2"/>
+    <text x="1005" y="291" font-size="14" font-weight="700" fill="#1A4FCC" text-anchor="middle">Agent 3 · 生成</text>
+    <text x="1005" y="311" font-size="11" fill="#1F2329" text-anchor="middle">三槽候选</text>
+    <text x="1005" y="330" font-size="10" fill="#8F959E" text-anchor="middle">原题重述 / 主旨概括</text>
+    <text x="1005" y="346" font-size="10" fill="#8F959E" text-anchor="middle">/ 核心钩子</text>
+    <text x="1005" y="368" font-size="10" fill="#F54A45" text-anchor="middle">⚠ 与评审是两个模型</text>
+  </g>
+  <g>
+    <rect x="1160" y="265" width="170" height="120" rx="12" fill="#DCE8FF" stroke="#3370FF" stroke-width="2"/>
+    <text x="1245" y="291" font-size="14" font-weight="700" fill="#1A4FCC" text-anchor="middle">Agent 4 · 评审</text>
+    <text x="1245" y="311" font-size="11" fill="#1F2329" text-anchor="middle">底线 + 打分</text>
+    <text x="1245" y="330" font-size="10" fill="#8F959E" text-anchor="middle">G1–G4 通过 / 驳回</text>
+    <text x="1245" y="346" font-size="10" fill="#8F959E" text-anchor="middle">Q1–Q3 各 ≥2 分</text>
+    <text x="1245" y="368" font-size="10" fill="#F54A45" text-anchor="middle">独立模型 · 只看结果</text>
+  </g>
+
+  <!-- Workflow 层 -->
+  <g>
+    <rect x="180" y="507" width="140" height="66" rx="10" fill="#EEF0F2" stroke="#8F959E" stroke-width="1.5"/>
+    <text x="250" y="534" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">受理与</text>
+    <text x="250" y="552" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">材料评估</text>
+
+    <rect x="350" y="507" width="120" height="66" rx="10" fill="#EEF0F2" stroke="#8F959E" stroke-width="1.5"/>
+    <text x="410" y="534" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">风险</text>
+    <text x="410" y="552" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">预判</text>
+
+    <rect x="920" y="507" width="140" height="66" rx="10" fill="#EEF0F2" stroke="#8F959E" stroke-width="1.5"/>
+    <text x="990" y="534" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">硬约束检查</text>
+    <text x="990" y="552" font-size="10" fill="#8F959E" text-anchor="middle">G4 格式 / G1 限定</text>
+
+    <rect x="1160" y="507" width="140" height="66" rx="10" fill="#EEF0F2" stroke="#8F959E" stroke-width="1.5"/>
+    <text x="1230" y="534" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">分流与护栏</text>
+    <text x="1230" y="552" font-size="10" fill="#8F959E" text-anchor="middle">5 种路由 · 9 条护栏</text>
+
+    <rect x="1340" y="507" width="140" height="66" rx="10" fill="#EEF0F2" stroke="#8F959E" stroke-width="1.5"/>
+    <text x="1410" y="534" font-size="12.5" font-weight="700" fill="#3F444D" text-anchor="middle">交付或终止</text>
+    <text x="1410" y="552" font-size="10" fill="#8F959E" text-anchor="middle">待人工 / 失败 / 停止</text>
+  </g>
+
+  <!-- 人工层 -->
+  <g>
+    <rect x="460" y="662" width="185" height="86" rx="10" fill="#FFE7CC" stroke="#FF8800" stroke-width="2"/>
+    <text x="552" y="689" font-size="13" font-weight="700" fill="#B86E00" text-anchor="middle">高风险核实</text>
+    <text x="552" y="709" font-size="10" fill="#B86E00" text-anchor="middle">纯人 · 事实被证伪时</text>
+    <text x="552" y="728" font-size="10" fill="#B86E00" text-anchor="middle">放行 / 排除 / 终止</text>
+
+    <rect x="920" y="662" width="220" height="86" rx="10" fill="#FFE7CC" stroke="#FF8800" stroke-width="2"/>
+    <text x="1030" y="689" font-size="13" font-weight="700" fill="#B86E00" text-anchor="middle">修复审核 ＋ 发布批准</text>
+    <text x="1030" y="709" font-size="10" fill="#B86E00" text-anchor="middle">纯人 · AI 起草，人批准</text>
+    <text x="1030" y="728" font-size="10" fill="#B86E00" text-anchor="middle">程序不能自己让新版本生效</text>
+
+    <rect x="1180" y="662" width="170" height="86" rx="10" fill="#FFE7CC" stroke="#FF8800" stroke-width="2"/>
+    <text x="1265" y="689" font-size="13" font-weight="700" fill="#B86E00" text-anchor="middle">缺陷归因</text>
+    <text x="1265" y="709" font-size="10" fill="#B86E00" text-anchor="middle">人机协作 · AI 先归因</text>
+    <text x="1265" y="728" font-size="10" fill="#B86E00" text-anchor="middle">人确认或改正</text>
+
+    <rect x="1390" y="662" width="160" height="86" rx="10" fill="#FFE7CC" stroke="#FF8800" stroke-width="2"/>
+    <text x="1470" y="689" font-size="13" font-weight="700" fill="#B86E00" text-anchor="middle">三档判定</text>
+    <text x="1470" y="709" font-size="10" fill="#B86E00" text-anchor="middle">人机协作 · 系统备料</text>
+    <text x="1470" y="728" font-size="10" fill="#B86E00" text-anchor="middle">人裁决 · 后两档须写理由</text>
+  </g>
+
+  <!-- 工具/资源层 -->
+  <g>
+    <rect x="460" y="836" width="110" height="58" rx="9" fill="#EFE9FF" stroke="#7B61FF" stroke-width="1.5"/>
+    <text x="515" y="861" font-size="11.5" font-weight="700" fill="#5B3FD9" text-anchor="middle">搜索引擎</text>
+    <text x="515" y="879" font-size="9.5" fill="#7B61FF" text-anchor="middle">只读</text>
+
+    <rect x="585" y="836" width="100" height="58" rx="9" fill="#EFE9FF" stroke="#7B61FF" stroke-width="1.5"/>
+    <text x="635" y="861" font-size="11.5" font-weight="700" fill="#5B3FD9" text-anchor="middle">规则包</text>
+    <text x="635" y="879" font-size="9.5" fill="#7B61FF" text-anchor="middle">只读</text>
+
+    <rect x="700" y="836" width="100" height="58" rx="9" fill="#EFE9FF" stroke="#7B61FF" stroke-width="1.5"/>
+    <text x="750" y="861" font-size="11.5" font-weight="700" fill="#5B3FD9" text-anchor="middle">案例库</text>
+    <text x="750" y="879" font-size="9.5" fill="#7B61FF" text-anchor="middle">读＋写</text>
+
+    <rect x="920" y="836" width="110" height="58" rx="9" fill="#EFE9FF" stroke="#7B61FF" stroke-width="1.5"/>
+    <text x="975" y="861" font-size="11.5" font-weight="700" fill="#5B3FD9" text-anchor="middle">生成模型</text>
+    <text x="975" y="879" font-size="9.5" fill="#7B61FF" text-anchor="middle">只读</text>
+
+    <rect x="1045" y="836" width="110" height="58" rx="9" fill="#EFE9FF" stroke="#7B61FF" stroke-width="1.5"/>
+    <text x="1100" y="861" font-size="11.5" font-weight="700" fill="#5B3FD9" text-anchor="middle">评审模型</text>
+    <text x="1100" y="879" font-size="9.5" fill="#7B61FF" text-anchor="middle">只读</text>
+
+    <text x="1210" y="858" font-size="11" fill="#7B61FF">无代码执行 · 无对外写操作</text>
+    <text x="1210" y="878" font-size="11" fill="#7B61FF">以上资源均被 Agent 层调用</text>
+  </g>
+
+  <!-- 日志/资产层 -->
+  <g>
+    <rect x="960" y="980" width="160" height="80" rx="10" fill="#DFF5E6" stroke="#34C724" stroke-width="1.5"/>
+    <text x="1040" y="1007" font-size="12.5" font-weight="700" fill="#1F8A3B" text-anchor="middle">缺陷台账</text>
+    <text x="1040" y="1026" font-size="10" fill="#1F8A3B" text-anchor="middle">112 条</text>
+    <text x="1040" y="1043" font-size="10" fill="#F54A45" text-anchor="middle">0 条审核通过</text>
+
+    <rect x="1180" y="980" width="180" height="80" rx="10" fill="#DFF5E6" stroke="#34C724" stroke-width="1.5"/>
+    <text x="1270" y="1007" font-size="12.5" font-weight="700" fill="#1F8A3B" text-anchor="middle">案例沉淀与检索</text>
+    <text x="1270" y="1026" font-size="10" fill="#1F8A3B" text-anchor="middle">已确认 142 条</text>
+    <text x="1270" y="1043" font-size="10" fill="#F54A45" text-anchor="middle">检索命中率 3.9%</text>
+
+    <rect x="1390" y="980" width="160" height="80" rx="10" fill="#DFF5E6" stroke="#34C724" stroke-width="1.5"/>
+    <text x="1470" y="1007" font-size="12.5" font-weight="700" fill="#1F8A3B" text-anchor="middle">判定落盘</text>
+    <text x="1470" y="1026" font-size="10" fill="#1F8A3B" text-anchor="middle">金标准表</text>
+    <text x="1470" y="1043" font-size="10" fill="#1F8A3B" text-anchor="middle">＋ 本批隔离库</text>
+  </g>
+
+  <!-- 主链 -->
+  <g fill="none" stroke="#3370FF" stroke-width="2.2" marker-end="url(#ar)">
+    <path d="M 245 163 L 245 507"/>
+    <path d="M 320 540 L 350 540"/>
+    <path d="M 470 540 L 500 540 L 500 420"/>
+    <path d="M 645 325 L 690 325"/>
+    <path d="M 875 325 L 920 325"/>
+    <path d="M 1005 385 L 1005 507"/>
+    <path d="M 1060 540 L 1105 540 L 1105 370 L 1160 370"/>
+    <path d="M 1245 385 L 1245 470 L 1230 470 L 1230 507"/>
+    <path d="M 1300 540 L 1340 540"/>
+    <path d="M 1410 573 L 1410 600 L 1450 600 L 1450 662"/>
+  </g>
+
+  <!-- 高风险挂起 -->
+  <g fill="none" stroke="#FF8800" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ar-o)">
+    <path d="M 552 420 L 552 662"/>
+  </g>
+  <text x="566" y="462" font-size="10" fill="#B86E00">核查高风险 → 挂起</text>
+
+  <!-- 三档判定 → 判定落盘 -->
+  <g fill="none" stroke="#FF8800" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ar-o)">
+    <path d="M 1470 748 L 1470 980"/>
+  </g>
+
+  <!-- 资产层 -->
+  <g fill="none" stroke="#34C724" stroke-width="2" marker-end="url(#ar-g)">
+    <path d="M 1390 1020 L 1360 1020"/>
+    <path d="M 1180 1020 L 1120 1020"/>
+    <path d="M 1180 705 L 1140 705"/>
+  </g>
+
+  <!-- 缺陷台账 → 缺陷归因 -->
+  <g fill="none" stroke="#34C724" stroke-width="2" marker-end="url(#ar-g)">
+    <path d="M 1040 980 L 1040 800 L 1265 800 L 1265 748"/>
+  </g>
+
+  <!-- 重写循环 -->
+  <g fill="none" stroke="#FF8800" stroke-width="2.4" marker-end="url(#ar-o)">
+    <path d="M 1300 540 L 1325 540 L 1325 455 L 1050 455 L 1050 385"/>
+  </g>
+  <text x="1060" y="448" font-size="10.5" font-weight="700" fill="#B86E00">重写循环（≤2 轮）</text>
+
+  <!-- 看点重选 -->
+  <g fill="none" stroke="#FF8800" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar-o)">
+    <path d="M 1245 265 L 1245 238 L 882 238"/>
+  </g>
+  <text x="1010" y="232" font-size="10" fill="#B86E00" text-anchor="middle">看点跑了 → 重选（限 1 次）</text>
+
+  <!-- 长期回流 -->
+  <g fill="none" stroke="#34C724" stroke-width="2.2" stroke-dasharray="8 5" marker-end="url(#ar-g)">
+    <path d="M 1030 662 L 1030 642 L 144 642 L 144 325 L 460 325"/>
+  </g>
+  <text x="150" y="640" font-size="10.5" font-weight="700" fill="#1F8A3B" transform="rotate(-90 150 640)">长期回流 · 已架设 · 未跑通</text>
+</svg>

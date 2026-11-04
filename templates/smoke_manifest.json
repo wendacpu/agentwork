@@ -1,0 +1,28 @@
+{
+  "version": "smoke-20261104",
+  "role": "冒烟：只验证管线在 300 池上跑通，样本不属于 V 集，结果不得用于质量结论",
+  "samples": [
+    {
+      "index": 1,
+      "video_id": "BV11SxY6ME6h",
+      "category": "资讯-时事社会",
+      "domain_1": "资讯",
+      "title": "朱之文回应：“种地不辛苦”被恶意断章取义，原意是科技在进步，过去面朝黄土背朝天，现在机械收机械种（来源：海报新闻、风芒新闻）"
+    },
+    {
+      "index": 2,
+      "video_id": "BV11SxY6MEp4",
+      "category": "摄影旅行-摄影技巧",
+      "domain_1": "摄影旅行",
+      "title": "如何在咖啡店给女朋友拍出片！"
+    },
+    {
+      "index": 3,
+      "video_id": "BV11axF6rEbc",
+      "category": "母婴亲子-宝宝日常",
+      "domain_1": "母婴亲子",
+      "title": "吹气球"
+    }
+  ],
+  "sample_size": 3
+}

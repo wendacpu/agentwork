@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1580" viewBox="0 0 2200 1580" role="img" aria-labelledby="title desc">
+<title id="title">短视频推荐文案 Agent｜业务泳道与反馈闭环</title><desc id="desc">业务、Workflow、Agent、工具和规则五层泳道，呈现三类 Agent 的生成评审链路、人工确认和反馈闭环。</desc>
+<defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#53637a"/></marker><marker id="purple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7951cf"/></marker><style>
+text{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;fill:#16243a}.title{font-size:40px;font-weight:750}.sub{font-size:20px;fill:#607086}.section{font-size:24px;font-weight:700}.lane{font-size:25px;font-weight:700}.laneSub{font-size:16px;fill:#728096}.cardTitle{font-size:21px;font-weight:700}.body{font-size:17px;fill:#526278}.tiny{font-size:15px;fill:#62718a}.white{fill:white}.flow{fill:none;stroke:#53637a;stroke-width:2.5;marker-end:url(#arr)}.feedback{fill:none;stroke:#7951cf;stroke-width:2.5;stroke-dasharray:7 6;marker-end:url(#purple)}.label{font-size:15px;fill:#526278;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.box{fill:white;stroke:#d9e1ed;stroke-width:1.5}.asset{fill:#f4f6fb;stroke:#d5ddea}.agent{stroke-width:2}.guide{stroke:#e5eaf2;stroke-width:1.5}
+</style></defs>
+<rect width="2200" height="1580" fill="#f8fafc"/><text x="60" y="70" class="title">短视频推荐文案 Agent</text><text x="605" y="70" class="title" fill="#77859a">｜业务泳道与反馈闭环</text><text x="62" y="106" class="sub">以一条视频为单位：理解内容 · 生成候选 · 质量评审 · 人工确认</text>
+<rect x="1510" y="35" width="630" height="76" rx="14" class="box"/><rect x="1532" y="54" width="20" height="20" rx="5" fill="#4979ed"/><text x="1562" y="70" class="tiny">Agent</text><rect x="1640" y="54" width="20" height="20" rx="5" fill="#ffedc8" stroke="#eab34c"/><text x="1671" y="70" class="tiny">人工确认</text><path d="M1810 64h60" class="flow"/><text x="1884" y="70" class="tiny">主链路</text><path d="M1990 64h60" class="feedback"/><text x="2060" y="70" class="tiny">反馈 / 重写</text>
+<text x="65" y="159" class="section">01　生成与审核主链路</text><text x="400" y="159" class="tiny">按职责划分五层泳道 · 三个 Agent 采用独立颜色</text>
+<!-- swimlane backgrounds -->
+<rect x="55" y="180" width="2090" height="116" rx="14" fill="#fff9ef"/><rect x="55" y="300" width="2090" height="142" rx="14" fill="#f0f4f9"/><rect x="55" y="446" width="2090" height="225" rx="14" fill="#f2f3ff"/><rect x="55" y="675" width="2090" height="117" rx="14" fill="#eef8f7"/><rect x="55" y="796" width="2090" height="93" rx="14" fill="#f2f5f9"/>
+<text x="80" y="228" class="lane">业务层</text><text x="80" y="257" class="laneSub">输入 · 人工确认</text><text x="80" y="350" class="lane">Workflow 层</text><text x="80" y="379" class="laneSub">编排 · 路由</text><text x="80" y="500" class="lane">Agent / LLM 层</text><text x="80" y="529" class="laneSub">理解 · 生成 · 评审</text><text x="80" y="723" class="lane">工具层</text><text x="80" y="752" class="laneSub">读取 · 检索 · 校验</text><text x="80" y="844" class="lane">规则层</text><text x="80" y="871" class="laneSub">业务规范与标准</text>
+<!-- business -->
+<rect x="350" y="200" width="302" height="72" rx="12" fill="#fff" stroke="#ecc875"/><text x="372" y="230" class="cardTitle">输入视频信息</text><text x="372" y="254" class="tiny">原标题、转写、画面文字及描述</text>
+<rect x="1650" y="200" width="400" height="72" rx="12" fill="#fff5dc" stroke="#e3ae42" stroke-width="2"/><text x="1672" y="230" class="cardTitle">人工审核与风险核实</text><text x="1672" y="254" class="tiny">确认是否采用 · 存疑时核实 · 记录问题</text>
+<!-- workflow -->
+<rect x="350" y="325" width="302" height="80" rx="12" class="box"/><text x="372" y="356" class="cardTitle">发起并编排任务</text><text x="372" y="383" class="body">组织材料、规则与节点调用</text>
+<rect x="1315" y="325" width="302" height="80" rx="12" class="box"/><text x="1337" y="356" class="cardTitle">汇总校验与评审结果</text><text x="1337" y="383" class="body">结合候选状态决定后续处理</text>
+<rect x="1650" y="315" width="400" height="108" rx="12" class="box"/><text x="1672" y="345" class="cardTitle">路由分流</text><text x="1672" y="371" class="body">可送审 → 人工　｜　可修复 → 重写</text><text x="1672" y="397" class="body">存疑 → 人工核实　｜　无法处理 → 停止</text>
+<!-- agents -->
+<rect x="350" y="470" width="430" height="172" rx="16" fill="#fff" stroke="#3974e8" class="agent"/><rect x="350" y="470" width="430" height="47" rx="14" fill="#3974e8"/><text x="370" y="501" class="cardTitle white">01　视频理解 Agent</text><text x="372" y="548" class="body">理解主要内容，整理事实与证据</text><text x="372" y="576" class="body">结合规则判断可写内容和必要限定</text><text x="372" y="613" class="tiny">输出：内容理解 · 证据 · 可写边界</text>
+<rect x="820" y="470" width="430" height="172" rx="16" fill="#fff" stroke="#8557dc" class="agent"/><rect x="820" y="470" width="430" height="47" rx="14" fill="#8557dc"/><text x="840" y="501" class="cardTitle white">02　文案生成 Agent</text><text x="842" y="548" class="body">确定主旨与核心看点，参考相关案例</text><text x="842" y="576" class="body">同一主旨、不同写法；按问题定向重写</text><text x="842" y="613" class="tiny">输出：最多 3 条候选推荐文案</text>
+<rect x="1290" y="470" width="430" height="172" rx="16" fill="#fff" stroke="#0c9295" class="agent"/><rect x="1290" y="470" width="430" height="47" rx="14" fill="#0c9295"/><text x="1310" y="501" class="cardTitle white">03　文案评审 Agent</text><text x="1312" y="548" class="body">检查事实、内容匹配、表达与业务规则</text><text x="1312" y="576" class="body">指出问题、判断是否可修复</text><text x="1312" y="613" class="tiny">输出：评审结论 · 问题 · 处理建议</text>
+<rect x="1760" y="485" width="290" height="135" rx="14" fill="#fff" stroke="#dbe3ed"/><text x="1780" y="517" class="cardTitle">生成与评审分工</text><text x="1780" y="545" class="body">生成负责写与改</text><text x="1780" y="571" class="body">评审负责判断与指出问题</text><text x="1780" y="597" class="tiny">最终采用由人工决定</text>
+<!-- tools -->
+<rect x="350" y="698" width="260" height="67" rx="11" class="box"/><text x="371" y="725" class="cardTitle">读取视频材料</text><text x="371" y="749" class="tiny">提取并整理任务输入</text>
+<rect x="820" y="698" width="260" height="67" rx="11" class="box"/><text x="841" y="725" class="cardTitle">案例检索</text><text x="841" y="749" class="tiny">按条件读取已确认案例</text>
+<rect x="1290" y="698" width="310" height="67" rx="11" class="box"/><text x="1311" y="725" class="cardTitle">固定项校验</text><text x="1311" y="749" class="tiny">长度 · 前缀 · 格式 · 引用</text>
+<rect x="1760" y="698" width="290" height="67" rx="11" class="box"/><text x="1781" y="725" class="cardTitle">记录与回归测试</text><text x="1781" y="749" class="tiny">保存结果 · 支持后续验证</text>
+<rect x="350" y="814" width="1700" height="55" rx="11" class="box"/><text x="375" y="848" class="body">业务规范　 /　 品类规则　 /　 可写边界　 /　 文案格式　 /　 评审标准</text><text x="1510" y="848" class="tiny">为理解、生成、校验与评审提供依据</text>
+<!-- arrows -->
+<path d="M500 272V322" class="flow"/><text x="510" y="299" class="label">视频信息</text><path d="M500 405V468" class="flow"/><text x="510" y="441" class="label">任务材料</text>
+<path d="M780 555H817" class="flow"/><text x="783" y="539" class="label">边界</text><path d="M1250 555H1287" class="flow"/><text x="1249" y="539" class="label">候选</text>
+<path d="M1455 470V408" class="flow"/><text x="1465" y="443" class="label">评审结论</text><path d="M1617 364H1647" class="flow"/><path d="M1850 315V275" class="flow"/><text x="1860" y="298" class="label">推荐与依据</text>
+<path d="M1875 423V452H1035V467" class="feedback"/><text x="1115" y="447" class="label">评审意见：可修复时返回生成（最多 2 轮）</text>
+<path d="M480 698V646" class="flow"/><path d="M950 698V646" class="flow"/><text x="960" y="680" class="label">相关案例</text><path d="M1445 698V646" class="flow"/><text x="1455" y="680" class="label">校验结果</text>
+<!-- feedback area -->
+<text x="65" y="945" class="section">02　反馈与经验回流</text><text x="400" y="945" class="tiny">人工判断是起点；案例复用与问题修复分别处理</text>
+<rect x="55" y="968" width="2090" height="390" rx="18" fill="#fff" stroke="#e0e6ef"/>
+<rect x="85" y="1000" width="245" height="142" rx="14" fill="#fff5dc" stroke="#e5b353" stroke-width="2"/><text x="107" y="1033" class="cardTitle">人工审核</text><text x="107" y="1063" class="body">确认采用或记录问题</text><text x="107" y="1091" class="tiny">人工判定与问题反馈</text>
+<text x="370" y="1005" class="section" fill="#ca8622">问题修复</text>
+<rect x="370" y="1020" width="260" height="100" rx="12" fill="#f7f9fc" stroke="#d6deea"/><text x="390" y="1053" class="cardTitle">整理 Bad Case</text><text x="390" y="1082" class="tiny">问题、候选与相关证据</text>
+<rect x="690" y="1020" width="260" height="100" rx="12" fill="#fff8e8" stroke="#efc778"/><text x="710" y="1053" class="cardTitle">人工定位原因</text><text x="710" y="1082" class="tiny">确认根因与修复方式</text>
+<rect x="1010" y="1020" width="300" height="100" rx="12" fill="#f7f9fc" stroke="#d6deea"/><text x="1030" y="1053" class="cardTitle">修改并回归测试</text><text x="1030" y="1082" class="tiny">规则、提示词或程序</text>
+<rect x="1370" y="1020" width="305" height="100" rx="12" fill="#fff8e8" stroke="#efc778"/><text x="1390" y="1053" class="cardTitle">人工核验并批准</text><text x="1390" y="1082" class="tiny">确认修复结果，批准后观察</text>
+<rect x="1735" y="1020" width="335" height="100" rx="12" fill="#f7f4ff" stroke="#d9cbf3"/><text x="1755" y="1053" class="cardTitle">后续任务使用</text><text x="1755" y="1082" class="tiny">批准后的规则或版本</text>
+<path d="M330 1069H367" class="flow"/><path d="M630 1069H687" class="flow"/><path d="M950 1069H1007" class="flow"/><path d="M1310 1069H1367" class="flow"/><path d="M1675 1069H1732" class="feedback"/>
+<text x="370" y="1184" class="section" fill="#7450ca">案例沉淀</text>
+<rect x="370" y="1202" width="300" height="95" rx="12" fill="#fff" stroke="#d8c9f5"/><text x="390" y="1235" class="cardTitle">确认可复用案例</text><text x="390" y="1263" class="tiny">适用场景、问题与处理经验</text>
+<rect x="730" y="1202" width="300" height="95" rx="12" fill="#f7f4ff" stroke="#cbb8ee"/><text x="750" y="1235" class="cardTitle">Memory 案例库</text><text x="750" y="1263" class="tiny">保存已确认案例</text>
+<rect x="1090" y="1202" width="350" height="95" rx="12" fill="#fff" stroke="#d8c9f5"/><text x="1110" y="1235" class="cardTitle">后续生成按条件检索</text><text x="1110" y="1263" class="tiny">参考处理方式，不搬用其他视频事实</text>
+<path d="M210 1142V1250H367" class="feedback"/><path d="M670 1249H727" class="feedback"/><path d="M1030 1249H1087" class="feedback"/>
+<text x="1510" y="1234" class="tiny">注：冻结批次反馈保存在独立反馈库，</text><text x="1510" y="1260" class="tiny">不自动进入案例库或修复链。</text>
+<!-- assets -->
+<text x="65" y="1408" class="section">数据资产</text><text x="210" y="1408" class="tiny">持续记录，可用于检索、排查与验证</text>
+<rect x="65" y="1430" width="650" height="100" rx="14" class="asset"/><text x="90" y="1466" class="cardTitle">案例库</text><text x="90" y="1498" class="body">适用场景、典型问题与处理经验</text>
+<rect x="750" y="1430" width="650" height="100" rx="14" class="asset"/><text x="775" y="1466" class="cardTitle">评测与回归样本</text><text x="775" y="1498" class="body">原案例、同类案例与历史正确案例</text>
+<rect x="1435" y="1430" width="700" height="100" rx="14" class="asset"/><text x="1460" y="1466" class="cardTitle">任务与反馈记录</text><text x="1460" y="1498" class="body">候选文案、评审意见、人工判定与版本信息</text>
+</svg>

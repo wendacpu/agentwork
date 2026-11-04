@@ -5,11 +5,25 @@ import hashlib
 import hmac
 import json
 import os
+import random
+import ssl
 import time
 from datetime import datetime, timezone
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from ..model import ModelError
+
+
+# 本机 TUN 代理下实测：同一域名连续握手约一半概率拿到 SSL UNEXPECTED_EOF，
+# 重试一次即可显著提高成功率。核查是可选增强能力，不该因一次网络抖动打死整条任务。
+_TRANSIENT_RETRY_ATTEMPTS = 3
+_TRANSIENT_BACKOFF_SECONDS = 1.5
+
+# 可重试的 HTTP 状态：限流与服务端临时故障属于瞬时问题；
+# 400/401/403/404/422 是请求或凭据问题，重试没有意义。
+_RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 class SearchProvider(Protocol):
@@ -61,16 +75,34 @@ class WsaSearchProvider:
     def _http_post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeout: float) -> dict[str, Any]:
         # Serialize identically to _tc3_headers: the exact bytes are part of the signature.
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        request = Request(url, data=body, headers=headers, method="POST")
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                data = response.read(2_000_000)
-        except HTTPError as exc:
-            # 不附带请求头或密钥，避免把凭据写入日志/异常信息。
-            detail = exc.read(1000).decode("utf-8", errors="replace")
-            raise RuntimeError(f"WSA HTTP {exc.code}: {detail}") from None
-        except (URLError, TimeoutError) as exc:
-            raise RuntimeError(f"WSA request failed: {exc.reason if isinstance(exc, URLError) else 'timeout'}") from None
+        data: bytes | None = None
+        last_error = ""
+        for attempt in range(_TRANSIENT_RETRY_ATTEMPTS):
+            request = Request(url, data=body, headers=headers, method="POST")
+            try:
+                with urlopen(request, timeout=timeout) as response:
+                    data = response.read(2_000_000)
+                break
+            except HTTPError as exc:
+                # 不附带请求头或密钥，避免把凭据写入日志/异常信息。
+                detail = exc.read(1000).decode("utf-8", errors="replace")
+                if exc.code not in _RETRYABLE_HTTP_STATUS:
+                    # 请求或凭据问题：重试没有意义，也不该被上层当成瞬时故障。
+                    raise ModelError(f"WSA HTTP {exc.code}: {detail}", retryable=False) from None
+                last_error = f"WSA HTTP {exc.code}: {detail}"
+            except (URLError, TimeoutError, ssl.SSLError, OSError) as exc:
+                # SSL UNEXPECTED_EOF / 连接重置 / 超时都属瞬时网络故障，重试有意义。
+                reason = getattr(exc, "reason", None) or exc
+                last_error = f"WSA request failed: {reason}"
+            if attempt < _TRANSIENT_RETRY_ATTEMPTS - 1:
+                # 退避带抖动，避免多个核查请求同时重试再撞在一起。
+                time.sleep(_TRANSIENT_BACKOFF_SECONDS * (attempt + 1) + random.uniform(0, 0.4))
+        if data is None:
+            # 重试用尽仍失败：标成可重试，让上层决定是否续跑，而不是把整条任务判死。
+            raise ModelError(
+                f"{last_error}（已重试 {_TRANSIENT_RETRY_ATTEMPTS} 次，疑似本机网络或代理链路不稳定）",
+                retryable=True,
+            )
         try:
             return json.loads(data.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:

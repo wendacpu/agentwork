@@ -2,12 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .types import Evidence, VideoInput
+
+def _duration_seconds(metadata: dict[str, Any], row: dict[str, Any]) -> float | None:
+    """视频时长以素材元数据为准（与容器一致）；表格里的时长是四舍五入值。
+
+    时间码越界只记录不阻断（见 pipeline.LOCATOR_ISSUE_CODES），这里只是把时长取准，
+    好让审计报告里的偏差是真实偏差，而不是表格四舍五入造出来的。
+    """
+    for candidate in (metadata.get("duration"), row.get("duration")):
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool) and math.isfinite(candidate) and candidate > 0:
+            return float(candidate)
+    return None
 
 
 def _norm_text(text: str | None) -> str:
@@ -94,6 +106,7 @@ class Dataset:
         source_description = src.get("searchDesc")
         if source_description:
             evidence.append(Evidence("e-source-description", "source_description", str(source_description), "metadata.source.searchDesc", quality="unverified_source_metadata"))
+        duration = _duration_seconds(metadata, row)
         for s in asr:
             evidence.append(Evidence(f"e-{s['segment_id']}", "asr", s["text"], f"asr:{s.get('start')}-{s.get('end')}", quality="raw_asr"))
         for s in used_ocr:
@@ -113,7 +126,7 @@ class Dataset:
             video_id=video_id, title=row.get("title", ""), author=row.get("作者昵称", src.get("author", "")),
             author_uid=row.get("作者UID", src.get("authorMid")), url=row.get("videoURL", ""),
             domain=row.get("内容领域", {}), format=row.get("内容形态", ""),
-            published_at=_date(row.get("发布时间", src.get("pubdate"))), duration=row.get("duration"),
+            published_at=_date(row.get("发布时间", src.get("pubdate"))), duration=duration,
             dimensions={"width": row.get("width"), "height": row.get("height")}, description=row.get("description", ""),
             caption=row.get("caption", ""), asr_segments=asr, ocr_segments=used_ocr, evidence=evidence,
             asset_paths=paths, provenance={"hashes": hashes, "description_source": "model_derived_uncalibrated", "caption_source": "model_derived_uncalibrated", "ocr_mode": self.ocr_mode, "metadata": metadata},

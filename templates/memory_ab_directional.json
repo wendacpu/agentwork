@@ -1,0 +1,176 @@
+{
+  "version": "memory-ab-directional-v1",
+  "created": "2026-11",
+  "rule_version": "red-dot-v0.2-modular",
+  "sample_size": 6,
+  "note": "条件化样本：只保留 A 臂确实能检索到他人案例的视频，用于判断方向，不能外推为总体效果。B 臂对这些视频一律无案例（案例库隔离为空）。",
+  "selection_bias": "样本按「A 臂有案例」筛选，非随机抽样；结论只对「有案例可用」的工况成立。",
+  "samples": [
+    {
+      "video_id": "BV1P9sf6BEHJ",
+      "domain_1": "资讯",
+      "domain_2": "体育赛事",
+      "form": "资讯播报",
+      "title": "南非一球场边写字楼里两员工正偷看球赛被球场大屏抓包后一秒归位",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-bf517cc38e69-cand-002",
+          "video_id": "BV1qBxE6JESv",
+          "overlap": 2,
+          "problem_type": "upstream",
+          "applicability": "重点是这次球场单挑，而非众人举手机记录的动作"
+        },
+        {
+          "case_id": "auto-task-bf517cc38e69-cand-001",
+          "video_id": "BV1qBxE6JESv",
+          "overlap": 1,
+          "problem_type": "expression:wording_unclear",
+          "applicability": "赤膊男视频里叫邹敏嘉，他和黑衣男子有互换进攻和防守，邹敏嘉不是一直持球"
+        },
+        {
+          "case_id": "auto-task-bf517cc38e69-cand-003",
+          "video_id": "BV1qBxE6JESv",
+          "overlap": 1,
+          "problem_type": "upstream",
+          "applicability": "重点是球场单挑这个事件，而非作者打字幕"
+        }
+      ]
+    },
+    {
+      "video_id": "BV1tBHV6gE6s",
+      "domain_1": "时尚美妆",
+      "domain_2": "美妆教程",
+      "form": "教程演示",
+      "title": "GRWM｜10min早八伪素颜🫧无粉感有效淡妆⏰",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-202f9b17bd63-cand-2",
+          "video_id": "BV1JSxL6LErm",
+          "overlap": 1,
+          "problem_type": "upstream",
+          "applicability": "应该是作者他演绎健身的这个习惯，配上字幕“每天坚持 100 下”，意图是希望观众能够一起养成健身的习惯，而不是说因为字幕"
+        }
+      ]
+    },
+    {
+      "video_id": "BV1DQH56JEPr",
+      "domain_1": "美食",
+      "domain_2": "饮食文化",
+      "form": "讲解分享",
+      "title": "四川其实吃得很清淡，比如以这耙耙菜为证",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-8fc45338e388-cand-2",
+          "video_id": "BV1HHxv6KEPm",
+          "overlap": 1,
+          "problem_type": "事实与信源",
+          "applicability": "这里其实不是事实错误，而是事实不全。这里的“女摊主”应该准确到“蚌埠烧烤女皇”，还是“蚌埠烧烤女摊主”怎么样。我前面已经"
+        },
+        {
+          "case_id": "auto-task-228ed7b2851c-cand-3",
+          "video_id": "BV1xRxv6CEfp",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "排队只是其中的一个看点，但关键在于这个牛肉面的特色，比如说它的辣子快占了半碗。"
+        },
+        {
+          "case_id": "auto-task-53908ba099e0-cand-3",
+          "video_id": "BV1nKxi6KEBm",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "你这个前后不构成因果关系。顾客问什么？在你这个标题里面，摊主答的答非所问呀。"
+        }
+      ]
+    },
+    {
+      "video_id": "BV1qpxM6SEu8",
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "制作姜红糖，纯手工熬制，还原小时候的味道，老工艺慢火熬煮，如今这样传统做法，现在很少人能吃到了。#制作姜红糖",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-ba33c2d9898e-cand-1",
+          "video_id": "BV1Y9xa62E9C",
+          "overlap": 2,
+          "problem_type": "表达",
+          "applicability": "这只是视频的一个事实，但是这个事实本身不构成看点，看点是妈妈展示这个菜的制作过程，同时与观众互动，说：“给这个菜取个名字"
+        },
+        {
+          "case_id": "auto-task-5ef3359a08a2-cand-2",
+          "video_id": "BV1FwxF6AEoU",
+          "overlap": 2,
+          "problem_type": "root_cause_unresolved",
+          "applicability": "作者改为博主更好。"
+        },
+        {
+          "case_id": "auto-task-6d8bc2aa0b09-cand-2",
+          "video_id": "BV1Drxv6HEm5",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "表达有问题，读起来不通顺。什么叫做“这锅秒回台湾”？应该是“吃起来好吃到像是秒回台湾”吧。"
+        }
+      ]
+    },
+    {
+      "video_id": "BV1LmsZ6XEyY",
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "现场记录",
+      "title": "四川遂宁街边6元一碗五谷凉粉#地方特色美食谁懂这一口 #街边小吃 #地方宝藏美食 #美食分享",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-b58ec18dc40f-cand-1",
+          "video_id": "BV1wtxN6SE4A",
+          "overlap": 2,
+          "problem_type": "表达",
+          "applicability": "缺少主语。"
+        },
+        {
+          "case_id": "auto-task-8fc45338e388-cand-2",
+          "video_id": "BV1HHxv6KEPm",
+          "overlap": 1,
+          "problem_type": "事实与信源",
+          "applicability": "这里其实不是事实错误，而是事实不全。这里的“女摊主”应该准确到“蚌埠烧烤女皇”，还是“蚌埠烧烤女摊主”怎么样。我前面已经"
+        },
+        {
+          "case_id": "auto-task-5718bc8c6732-cand-3",
+          "video_id": "BV19ixc6oEaM",
+          "overlap": 1,
+          "problem_type": "事实与信源",
+          "applicability": "关键是，这个一碗哈儿面价格太高了。这个才是视频的看点。不是说这个“哈儿”是什么意思，这个是看点。"
+        }
+      ]
+    },
+    {
+      "video_id": "BV1hGHA67ETB",
+      "domain_1": "健康运动",
+      "domain_2": "健身训练",
+      "form": "教程演示",
+      "title": "居家跟练｜核心UP",
+      "a_arm_cases": [
+        {
+          "case_id": "auto-task-142c416594de-cand-3",
+          "video_id": "BV159xe6sEBj",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "这个只是在做鸡腿的过程中，其中的一个步骤吧，不适合作为核心看点。"
+        },
+        {
+          "case_id": "auto-task-ba33c2d9898e-cand-3",
+          "video_id": "BV1Y9xa62E9C",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "关键是让用户给这个菜品起名，跟标题差不多。这个只是视频中的某一个看点吧，就是某一个事实、某一个过程，它不构成视频的核心看"
+        },
+        {
+          "case_id": "auto-task-ba33c2d9898e-cand-2",
+          "video_id": "BV1Y9xa62E9C",
+          "overlap": 1,
+          "problem_type": "表达",
+          "applicability": "他是谁？他应该是博主啊。而且像这种对视频内容的简单总结概括，不适合作为标题，或者说没有核心的看点。你觉得这句话适合作为看"
+        }
+      ]
+    }
+  ]
+}

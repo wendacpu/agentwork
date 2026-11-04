@@ -48,10 +48,16 @@ def test_prohibition_limit_on_same_claim_does_not_kill_the_candidate():
 
 
 def test_attribution_still_required_when_title_has_none():
-    """放宽的是禁令，不是归属：同一 claim 却不写归属，仍然要拦。"""
+    """放宽的是禁令，不是归属：同一 claim 却不写归属，限定必须登记交评审。
+
+    新契约（2026-11-04）：词法不再判「标题是否真的归给了对的人」，归属义务改为
+    登记进 limit_requirements，由 R01 在 limit_checks 里逐条判定。这里断言登记，
+    不再断言词法直接判死。
+    """
     decisions = [_decision("c1", "须归属为博主个人说法", "动作名称ASR转写不清，不得逐字采信")]
-    codes = {e["code"] for e in _check("体测跑前9个热身动作", decisions)["errors"]}
-    assert "G1_MISSING_LIMIT" in codes
+    result = _check("体测跑前9个热身动作", decisions)
+    assert "G1_MISSING_LIMIT" not in {e["code"] for e in result["errors"]}
+    assert "须归属为博主个人说法" in {r["limit"] for r in result["limit_requirements"]}
 
 
 def test_retention_limit_is_not_flattened_back():
@@ -95,10 +101,11 @@ def test_scoped_attribution_does_not_relax_plain_attribution():
 
 
 def test_plain_attribution_still_blocks_when_missing():
-    """剩下来的真拦截：博主自创训练计划没写归属。"""
+    """剩下来的真拦截：博主自创训练计划没写归属——限定必须登记交评审。"""
     decisions = [_decision("c1", "须归属为博主自述，不得写成系统确认的普遍适用结论")]
-    codes = {e["code"] for e in _check("女生居家一周四练day1：哑铃练背", decisions)["errors"]}
-    assert "G1_MISSING_LIMIT" in codes
+    result = _check("女生居家一周四练day1：哑铃练背", decisions)
+    assert "G1_MISSING_LIMIT" not in {e["code"] for e in result["errors"]}
+    assert "须归属为博主自述，不得写成系统确认的普遍适用结论" in {r["limit"] for r in result["limit_requirements"]}
 
 
 # --- 范围/条件/不确定性类限定仍然必须表达（防止顺手放太宽） ---

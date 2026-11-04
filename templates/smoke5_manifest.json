@@ -1,0 +1,45 @@
+{
+  "version": "smoke5-v1",
+  "created": "2026-11-01",
+  "rule_version": "red-dot-v0.2-modular",
+  "max_chars": 20,
+  "sample_size": 5,
+  "note": "5 条未参与调优的干净样本；用于最新 Prompt 冒烟与人工评审，不用于统计推断。",
+  "samples": [
+    {
+      "video_id": "BV1o8nm6SEAA",
+      "title": "5个练习纠正孩子跑姿跑更快",
+      "domain_1": "健康运动",
+      "domain_2": "运动技能",
+      "form": "教程演示"
+    },
+    {
+      "video_id": "BV15msZ6XErV",
+      "title": "5个训练动作的常见错误二",
+      "domain_1": "健康运动",
+      "domain_2": "健身训练",
+      "form": "讲解分享"
+    },
+    {
+      "video_id": "BV1VsnD6DEhx",
+      "title": "“日常… 容貌焦虑 ”",
+      "domain_1": "生活记录",
+      "domain_2": "日常vlog",
+      "form": "现场记录"
+    },
+    {
+      "video_id": "BV1Lcsd67E8h",
+      "title": "沉浸式消耗补货收纳",
+      "domain_1": "生活记录",
+      "domain_2": "居家整理",
+      "form": "成果展示"
+    },
+    {
+      "video_id": "BV1FNgz6zELK",
+      "title": "生活中必备的常识，你都知道哪些？",
+      "domain_1": "知识科普",
+      "domain_2": "生活常识",
+      "form": "剧情短片"
+    }
+  ]
+}

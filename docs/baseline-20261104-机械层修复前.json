@@ -1,0 +1,52 @@
+{
+  "baseline_id": "baseline-20261104-机械层修复前",
+  "frozen_at": "2026-11-04T17:30:00+08:00",
+  "batch": "runtime/v_eval_fixed_20261104",
+  "video_set": "templates/validation_manifest.json (v2-20261104, 20 条, member_hash 583d62ec…)",
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash @ siliconflow",
+  "system_state": "结构修复生效（json_schema + 逐候选 + 载荷压缩）；词法限定连坐【尚未修复】",
+  "human_labels": {
+    "total": 49,
+    "approved": 31,
+    "marginal": 7,
+    "rejected": 11,
+    "tasks_covered": "19/20",
+    "tasks_with_approved": "18/19",
+    "reviewer": "Tiffany（评审台 63990, human_feedback_v2.db）"
+  },
+  "okr_metrics": {
+    "O1_严格可用交付率": {"value": 0.85, "numerator": 17, "denominator": 20, "口径": "首轮候选（无 -r 后缀）至少 1 条人工 approved；无标注任务按失败计", "target": 0.5, "met": true},
+    "O2_人审分钟降幅": {"value": null, "note": "评审台未记录耗时，待补"}
+  },
+  "guardrails": {
+    "放行准确率": {"value_strict": 0.7, "value_with_marginal": 0.8, "numerator": 8, "denominator": 10, "target": 0.95, "met": false},
+    "误放率": {"value": 0.2, "detail": "ready 10 条人工 rejected 2", "target": 0.05, "met": false},
+    "合格召回": {"value": 0.23, "numerator": 7, "denominator": 31, "target": 0.9, "met": false},
+    "错误拦截率": {"value": 0.77, "numerator": 24, "denominator": 31},
+    "首推接受率": {"value": 0.6, "numerator": 3, "denominator": 5},
+    "超长流入交付层": {"value": 0, "met": true}
+  },
+  "system_vs_human": {
+    "ready": {"n": 10, "approved": 7, "marginal": 1, "rejected": 2},
+    "needs_review": {"n": 31, "approved": 16, "marginal": 6, "rejected": 9, "误伤率": 0.71},
+    "rewrite": {"n": 8, "approved": 8, "白跑率": 1.0}
+  },
+  "cost": {
+    "R01_calls": 85,
+    "R01_invalid": 0,
+    "R01_prompt_tokens": 2132565,
+    "全节点prompt_tokens": 4616465,
+    "每视频prompt_tokens": 230823,
+    "每视频输入成本估算_rmb": 0.07
+  },
+  "known_defects_at_baseline": {
+    "限定连坐": "30 条候选被『限定语义待人工核实』压成 needs_review；人工 9 条 rejected 无一以限定为由（命中率 0/30）→ 已于同日晚修复为 limit_checks 契约，本 baseline 为修复前数据",
+    "G4_INVALID_REFERENCE": "rewrite 触发 6 条，人工 approved 5/6",
+    "G3_单独revise判rewrite": "4 条人工全 approved（G3 核心覆盖标准比人工严）",
+    "G4_LENGTH_EXCEEDED触发rewrite": "5 条，Q 分普遍 3/3/2",
+    "元话语词表缺口": "『字幕标X』写法未拦（人工 2 条 rejected 同因）",
+    "制作者语义缺失": "『博主合集/博主剪成』把制作者当场面见证人（人工 2 条 rejected）",
+    "流畅度失守": "人工 rejected 11 条里 4 条读不通顺；Q 维度未给低分"
+  },
+  "label_reuse_note": "生成侧未变更。复测方案：冻结 v_eval_fixed_20261104 各任务已生成候选，仅重放 R01 + 重算机械校验；本文件人工判定可全额复用。"
+}

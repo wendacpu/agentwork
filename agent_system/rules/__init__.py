@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .loader import COMMON_PATH, DOMAINS_PATH, FORMS_PATH, load_common, load_common_rule_ids, load_domain_rules, load_form_rules
-from .models import Rule, RuleBundle
+from .models import Rule, RuleBundle, prompt_text_from_context
 from .router import pick_domains, pick_forms
 from .rubric import REVIEW_RUBRIC_VERSION, TEMP_RULES, TEMP_RUBRIC, load_rules, rubric
 
@@ -46,5 +46,6 @@ def load_rule_bundle(*, domain: dict[str, str] | None = None, form: str | None =
 
 __all__ = [
     "Rule", "RuleBundle", "RED_DOT_VERSION", "REVIEW_RUBRIC_VERSION", "TEMP_RULES", "TEMP_RUBRIC",
+    "prompt_text_from_context",
     "load_rule_bundle", "load_rules", "load_common_rule_ids", "rubric",
 ]

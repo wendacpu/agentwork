@@ -25,7 +25,7 @@ def load_common() -> str:
 
 
 def load_common_rule_ids() -> list[str]:
-    return sorted(set(re.findall(r"\bU-[A-Z]\d{2}\b", load_common())))
+    return sorted(set(re.findall(r"\bU-[A-Z]\d{2}[a-z]?\b", load_common())))
 
 
 def _parse_blocks(path: Path, prefix: str) -> dict[str, dict[str, str]]:

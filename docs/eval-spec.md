@@ -2,6 +2,13 @@
 
 > 版本 v2.1 · 2026-11 · 配套 [bad-case-spec.md](bad-case-spec.md) / [reviewer-guide.md](reviewer-guide.md) / [templates/eval_manifest.json](../templates/eval_manifest.json) / [templates/gold.csv](../templates/gold.csv) / [scripts/eval.py](../scripts/eval.py)
 > 目的：把评测口径**对齐立项指标**（质量 / 效率 / 业务），用 20 条固定样本 + 人+强模型双标注 + 固定命令，产出可复现的 baseline。
+> 模型选型另见 [model-selection-plan.md](model-selection-plan.md)。
+
+## 版本与现状（2026-11 补记）
+
+- 旧报告 [runtime/eval/compare-human.md](../runtime/eval/compare-human.md) 与 [runtime/eval/compare.md](../runtime/eval/compare.md) 生成时，金标身份键里没有 task_id——`scripts/eval_compare.py` 的输入只有 video_id / title / verdict，同一视频在不同任务（不同模型臂、不同规则版本）下产出的同名候选会被当成同一条记录；两份报告自己写着候选数不等（human 版 20 / 34，另一版 20 / 43）。**跨任务标签错配 + 候选数不等，这两件事决定它们只能作历史参考，不能作为「复杂流程优于基线」的证据。**
+- 现行口径以 `scripts/eval.py` 为准：严格率只数「可用」；「含勉强通过」单列；推荐准确率的分母是已评价的系统推荐；金标缺 task_id 报 ambiguous、候选不在该任务内按身份不一致拒绝计分；不传 `--db` 扫全库时脚本带警告，结果不作为验收结论。
+- **task_id 是正式评测的必填项**：起草阶段可以临时留空，但只要要出结论，每行必须有 task_id，且 candidate_id 必须存在于该 task_id 的任务候选中（`scripts/eval.py:76-91`、`scripts/eval.py:225-231`）。回填 task_id 属于起草动作，不是正式评测里可省的一步。
 
 ---
 
@@ -82,13 +89,13 @@
 ### 2.3 字段 + 坑
 gold.csv 14 列：video_id / **task_id（必填，防错配）** / candidate_id / 标题 / 系统路由 / 系统推荐 / 人工判定 / 人工最终标题 / 命中判据 ID / 回退节点 / 一句话理由 / 判定人 / 判定日期 / 驳回原因。
 
-四个坑：① task_id 必填，否则跨版本错配（eval.py 报 ambiguous）；② mock 样本剔除；③ 双标注才算得出 kappa；④ 判据 ID 可选但决定归因。
+四个坑：① task_id 必填（正式评测必填），且该 task_id 必须真的产出过这条候选，否则跨版本错配（eval.py 报 ambiguous / 身份不一致）；② mock 样本剔除；③ 双标注才算得出 kappa；④ 判据 ID 可选但决定归因。
 
 ---
 
 ## 3. 固定样本集（20 条）
 - 已落盘 [templates/eval_manifest.json](../templates/eval_manifest.json)：**20 条**，覆盖 6 个一级域 / 15 个二级 / 多样形态。
-- 选定后**不换**；task_id 首次跑完后回填。
+- 选定后**不换**；task_id 首次跑完后回填（回填属起草动作，正式评测必填，不留空）。
 - 版本锁定：video_id + task_id + rule_version + 模型 + 日期。
 
 ---
@@ -101,15 +108,79 @@ gold.csv 14 列：video_id / **task_id（必填，防错配）** / candidate_id 
 4. **基线 pipeline** 跑同一批 20 条，出对比表；
 5. 报告带版本号，**同一版本跑两次结果一致**（可复现）。
 
+工具链（本轮已建，mock 跑通）：
+- scripts/baseline_run.py：基线（大模型直出 + 基础审核）
+- scripts/run_manifest.py：当前系统按 manifest 跑
+- scripts/gold_skeleton.py：跑批结果 → 待标注 CSV
+- scripts/model_review.py：模型副标注（三档）
+- scripts/eval_compare.py：基线 vs 当前对比表
+- scripts/run_eval.py：一键编排（--stage prepare/finalize/all，--mock 可零额度验证）
+
 达标后交 Tiffany 评估，作为第一版 baseline。
 
 ---
 
 ## 5. 当前差距 + 顺序
-1. ✅ manifest 已落（20 条）——本轮完成。
-2. ⬜ task_id 待回填（跑完 20 条后）。
-3. ⬜ gold 样本太小（29 行）。
-4. ⬜ kappa 待算（需双标注）。
-5. ⬜ 基线未建。
+1. ✅ 口径 + 20 条 manifest 已落（v2.1）。
+2. ✅ 工具链已建并 mock 跑通：baseline_run / run_manifest / gold_skeleton / model_review / eval_compare。
+3. ⬜ 真跑：基线 20 条 + 当前系统 20 条（需模型额度）。
+4. ⬜ 人标注（你）+ 模型副标注 → 算 kappa。
+5. ⬜ 出「当前系统 vs 基线」对比表。
 
-**顺序**：跑 20 条 → 回填 task_id → 双标注 → 算 kappa → 建基线 → 对比。
+**顺序**：真跑 20 条（基线 + 当前系统）→ gold_skeleton → 人/模型双标注 → 算 kappa → eval_compare。
+
+---
+
+## 6. 判定与候选集口径（2026-11-02 补记）
+
+这一节解决一个具体问题：批次重跑后，**反馈库里同时存在两代候选集的判定**。按同一把尺子量会得到两个都错的数，所以口径必须显式。
+
+### 6.1 指标名对齐
+
+§1.1 的指标名与提案正文不完全一致，以提案为准，对应关系如下（目标值一致，不是两套标准）：
+
+| 提案指标 | 本文档叫法 | 目标 | 备注 |
+|---|---|---|---|
+| 首轮任务成功率 | 一次通过率（严格） | ≥78% | 同义 |
+| 重写挽救率 | 任务级重写挽救率 | ≥35% | §1.5 已定义 |
+| 最终合格供给率 | 可交付率 | ≥85% | 任务级，未产出计入分母 |
+| 误放率 | 1 − 放行准确率 | ≤5% | 与旧版 95% 放行准确率等价 |
+| 误拦率 | 1 − 召回率 | ≤10% | 与旧版 90% 召回等价 |
+| 首推严格可用率 | 首推接受率 | ≥50% | 首推那条被判「可用」的任务 ÷ 全部任务（2026-11 定为 50%，原 75% 废止） |
+
+> **误放率按「非可用」算，不按「不可用」算。** 系统放行的候选被判「勉强通过」，也算误放——业务上那条标题仍需人工改一笔才敢发。这两个口径差 10 个点以上，不要混用。
+
+### 6.2 轮次一律以 `candidate_id` 为准
+
+不看 `generation_round`。这个字段由模型输出、程序未固定（`pipeline.py` 用的是 `item.get("generation_round", rewrite_round)`），实测模型会写 `-1` 或 `100`，后果真实发生过两次：
+
+- **R18**：`cand-3-r-1-2`（机械检查干净、人判可用）因轮次写成 `-1` 被判「轮次未知」，在有正常轮次的批次里**被静默丢弃**，整条候选没上台；
+- **R15**：三条首轮候选因轮次写成 `1` 被当成重写轮，首轮桶为空 → 误判「零合规候选」，其中 `cand-1` 人判**可用**。
+
+`candidate_id` 是程序拼的（`{parent}-r{round}-{index}`），可靠。历史数据里两种写法并存：`cand-2-r1-1` 与 `cand-2-r-1-1`，两种都要认。
+
+**待修根因**：`pipeline.py` 应把 `generation_round` 固定为程序自己的 `rewrite_round`，不采信模型输出。
+
+### 6.3 两条口径，不能混用
+
+| 口径 | 用途 | 候选范围 | 为什么 |
+|---|---|---|---|
+| **首轮口径** | M1 首轮成功率、M4 挽救率 | 该任务**所有轮次、所有候选**，含被机械判否的、含更早候选集的判定 | 提案问的是「人判过的首轮标题里有几条能用」。R01 的首轮标题「博主：体测跑前9个热身动作」被判可用却被 `G4_NUMERIC_CONFLICT` 误拦，把误拦记成生成失败，等于用系统自己的 bug 压低自己的成绩 |
+| **交付口径** | M5 供给率、M6 误放率、M7 误拦率、首推可用率 | 只用当前 `review_mapping.json` 冻结的候选 + 当前路由 | 这几项问的是**当前路由**的表现，混入历史候选会把路由责任摊薄 |
+
+### 6.4 已知机械误杀（会持续压低 M1/M5，直到规则修好）
+
+| 视频 | 规则 | 人判 | 说明 |
+|---|---|---|---|
+| R15 | `G1_MISSING_LIMIT` ×3 | 1 可用 / 1 勉强 / 1 不可用 | 三条全判否，其中一条人判可用 |
+| R01 | `G4_NUMERIC_CONFLICT` ×3 | 2 可用 / 1 不可用 | 口播能数出 9 个热身动作，被判「数值无据」 |
+
+**判否不清零：** 被机械判否的候选若被人评过，其判定仍计入首轮口径——否则误杀的代价会被隐藏。
+
+### 6.5 复算命令
+
+```bash
+python3 scripts/build_review_from_db.py --batch-dir runtime/<批次>   # 重建 mapping（会拒绝覆盖，先备份）
+python3 scripts/metrics_vs_target.py --batch-dir runtime/<批次>      # 出「实测 vs 目标」对照表
+python3 scripts/review_quality_report.py --batch-dir runtime/<批次>  # 出批次质量明细
+```

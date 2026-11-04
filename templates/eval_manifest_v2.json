@@ -1,0 +1,209 @@
+{
+  "version": "eval-v2",
+  "created": "2026-11-02",
+  "purpose": "对照实验样本：基线臂与系统臂共用同一份 40 条分层样本",
+  "selection": "一级内容领域分层（资讯按二级拆），每类 4 条；保留原 20 条样本，再按 videoID 排序后固定随机（seed=20261102）补足",
+  "sample_size": 40,
+  "samples": [
+    {
+      "category": "健康运动",
+      "video_id": "BV15msZ6XErV",
+      "index": 1
+    },
+    {
+      "category": "健康运动",
+      "video_id": "BV1SxnZ6AEe3",
+      "index": 2
+    },
+    {
+      "category": "健康运动",
+      "video_id": "BV1gax76vETi",
+      "index": 3
+    },
+    {
+      "category": "健康运动",
+      "video_id": "BV1h7nY6aEvE",
+      "index": 4
+    },
+    {
+      "category": "时尚美妆",
+      "video_id": "BV1NdJX65E5z",
+      "index": 5
+    },
+    {
+      "category": "时尚美妆",
+      "video_id": "BV1WyHV6KEui",
+      "index": 6
+    },
+    {
+      "category": "时尚美妆",
+      "video_id": "BV1j6JR6AEAh",
+      "index": 7
+    },
+    {
+      "category": "时尚美妆",
+      "video_id": "BV1oFxE6LELz",
+      "index": 8
+    },
+    {
+      "category": "生活记录",
+      "video_id": "BV1ESxL6LEoo",
+      "index": 9
+    },
+    {
+      "category": "生活记录",
+      "video_id": "BV1Jisd6pE7H",
+      "index": 10
+    },
+    {
+      "category": "生活记录",
+      "video_id": "BV1PwsR6oEKW",
+      "index": 11
+    },
+    {
+      "category": "生活记录",
+      "video_id": "BV1yrpk69EmU",
+      "index": 12
+    },
+    {
+      "category": "知识科普",
+      "video_id": "BV11UHK6JEgs",
+      "index": 13
+    },
+    {
+      "category": "知识科普",
+      "video_id": "BV13ZHT6AEYW",
+      "index": 14
+    },
+    {
+      "category": "知识科普",
+      "video_id": "BV1LfnU6SE5c",
+      "index": 15
+    },
+    {
+      "category": "知识科普",
+      "video_id": "BV1t9x56XEn7",
+      "index": 16
+    },
+    {
+      "category": "美食",
+      "video_id": "BV17QpS6cEje",
+      "index": 17
+    },
+    {
+      "category": "美食",
+      "video_id": "BV1SyJt6yEMC",
+      "index": 18
+    },
+    {
+      "category": "美食",
+      "video_id": "BV1d6xN66EBS",
+      "index": 19
+    },
+    {
+      "category": "美食",
+      "video_id": "BV1qpxM6SEu8",
+      "index": 20
+    },
+    {
+      "category": "资讯-体育赛事",
+      "video_id": "BV1LwJe6BEAY",
+      "index": 21
+    },
+    {
+      "category": "资讯-体育赛事",
+      "video_id": "BV1P9sf6BEHJ",
+      "index": 22
+    },
+    {
+      "category": "资讯-体育赛事",
+      "video_id": "BV1qBxE6JESv",
+      "index": 23
+    },
+    {
+      "category": "资讯-体育赛事",
+      "video_id": "BV1r2HF64ESS",
+      "index": 24
+    },
+    {
+      "category": "资讯-文娱热点",
+      "video_id": "BV19BHg6kEFD",
+      "index": 25
+    },
+    {
+      "category": "资讯-文娱热点",
+      "video_id": "BV1g3xT6uECr",
+      "index": 26
+    },
+    {
+      "category": "资讯-文娱热点",
+      "video_id": "BV1hHxF6EEMp",
+      "index": 27
+    },
+    {
+      "category": "资讯-文娱热点",
+      "video_id": "BV1u9HA6JEdw",
+      "index": 28
+    },
+    {
+      "category": "资讯-时事社会",
+      "video_id": "BV11Ssf6gEUV",
+      "index": 29
+    },
+    {
+      "category": "资讯-时事社会",
+      "video_id": "BV1YGnc61EGr",
+      "index": 30
+    },
+    {
+      "category": "资讯-时事社会",
+      "video_id": "BV1eusZ6UEdg",
+      "index": 31
+    },
+    {
+      "category": "资讯-时事社会",
+      "video_id": "BV1fcnH6CEnE",
+      "index": 32
+    },
+    {
+      "category": "资讯-科技数码",
+      "video_id": "BV1SVxE6iE8G",
+      "index": 33
+    },
+    {
+      "category": "资讯-科技数码",
+      "video_id": "BV1Vuxu6EELQ",
+      "index": 34
+    },
+    {
+      "category": "资讯-科技数码",
+      "video_id": "BV1uWnZ6vEvj",
+      "index": 35
+    },
+    {
+      "category": "资讯-科技数码",
+      "video_id": "BV1wQnR6UEmi",
+      "index": 36
+    },
+    {
+      "category": "资讯-财经商业",
+      "video_id": "BV19AHd6PEAP",
+      "index": 37
+    },
+    {
+      "category": "资讯-财经商业",
+      "video_id": "BV1a3sZ67EQw",
+      "index": 38
+    },
+    {
+      "category": "资讯-财经商业",
+      "video_id": "BV1bWNi6cEw8",
+      "index": 39
+    },
+    {
+      "category": "资讯-财经商业",
+      "video_id": "BV1msnc6qELi",
+      "index": 40
+    }
+  ]
+}

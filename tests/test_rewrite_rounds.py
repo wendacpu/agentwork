@@ -121,9 +121,11 @@ class _PartialReviewAdapter(MockAdapter):
             if self.review_calls == 1:
                 for item in reply.data["reviews"]:
                     item["quality"]["Q1"] = {"score": 1, "reason": "指代不明"}
-            # 重写轮里丢掉一条评审，制造一条 REVIEW_SCHEMA_INVALID
+            # 批量缺评触发降级；逐条时保留前两条，特定第三条仍缺评，验证局部待核不连坐。
             if self.review_calls >= 2 and len(reply.data["reviews"]) > 1:
                 reply.data["reviews"] = reply.data["reviews"][:-1]
+            elif self.review_calls >= 2 and len(reply.data["reviews"]) == 1 and str(reply.data["reviews"][0].get("candidate_id", "")).endswith("-3"):
+                reply.data["reviews"] = []
             return reply
         return super().complete(**kwargs)
 

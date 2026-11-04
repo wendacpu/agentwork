@@ -1,0 +1,13 @@
+{
+  "version": "verify-872-v1",
+  "sample_size": 1,
+  "samples": [
+    {
+      "video_id": "BV19ixc6oEaM",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验"
+    }
+  ]
+}

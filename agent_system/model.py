@@ -6,6 +6,7 @@ import re
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -327,30 +328,60 @@ def _dump_bad_output(task: str, attempt: int, text: str) -> None:
 
 
 class OpenAICompatibleAdapter:
-    def __init__(self, base_url: str, api_key_env: str, model: str, timeout: int = 300, reasoning_effort: str = "") -> None:
+    def __init__(self, base_url: str, api_key_env: str, model: str, timeout: int = 300, reasoning_effort: str = "", structured_output: str = "off") -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key_env = api_key_env
         self.model = model
         self.timeout = timeout
         self.reasoning_effort = reasoning_effort
+        # off = 只用 json_object；auto = 有登记 schema 就用 json_schema，网关拒绝则回退；
+        # on = 强制用，拒绝即报错。见 RunConfig.structured_output 的说明。
+        self.structured_output = structured_output
+
+    def _response_format(self, schema: str) -> dict[str, Any] | None:
+        """有登记 schema 且启用结构化输出时返回 json_schema 描述，否则 None。"""
+        if self.structured_output == "off":
+            return None
+        from .review_schema import response_format as build_response_format
+        return build_response_format(schema)
+
+    def _post(self, payload: dict[str, Any], key: str) -> dict[str, Any]:
+        req = urllib.request.Request(
+            self.base_url + "/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            return json.loads(response.read().decode())
 
     def complete(self, *, task: str, system: str, user: dict[str, Any], schema: str, attempt: int = 0) -> ModelReply:
         key = os.getenv(self.api_key_env)
         if not key:
             raise ModelError(f"missing API key environment variable: {self.api_key_env}", retryable=False)
+        structured = self._response_format(schema)
         # 评审要给三个候选各出 3 门 + 3 个质量分的理由，8192 会在中文长理由下被截断；
         # max_tokens 只是上限，不写满不额外计费，所以放宽到 16384。
-        payload = {"model": self.model, "temperature": 0.2, "max_tokens": 16384, "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], "response_format": {"type": "json_object"}}
+        payload = {"model": self.model, "temperature": 0.2, "max_tokens": 16384, "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], "response_format": structured or {"type": "json_object"}}
         if self.reasoning_effort == "off":
-            # DeepSeek V4.1 默认开思考；关掉可把单节点从 ~68s 压到十几秒，代价是推理质量下降
-            payload["thinking"] = {"type": "disabled"}
+            # 不同网关的非思考参数不同，不能把 EvoLink 的字段直接用于硅基流动。
+            if urllib.parse.urlparse(self.base_url).hostname == "api.siliconflow.cn":
+                payload["enable_thinking"] = False
+            else:
+                payload["thinking"] = {"type": "disabled"}
         elif self.reasoning_effort:
             payload["reasoning_effort"] = self.reasoning_effort
-        req = urllib.request.Request(self.base_url + "/chat/completions", data=json.dumps(payload).encode(), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         start = time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                body = json.loads(response.read().decode())
+            try:
+                body = self._post(payload, key)
+            except urllib.error.HTTPError as exc:
+                # auto 模式：网关不接受 json_schema 时退回 json_object 重发一次，
+                # 否则一次参数不被支持就变成整批失败，比不用结构化输出还糟。
+                if structured is not None and self.structured_output == "auto" and exc.code in {400, 404, 422}:
+                    payload["response_format"] = {"type": "json_object"}
+                    body = self._post(payload, key)
+                else:
+                    raise
             text = body["choices"][0]["message"]["content"]
             try:
                 data = _unwrap_envelope(loads_json_loose(text))

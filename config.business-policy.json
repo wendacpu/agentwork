@@ -11,10 +11,50 @@
   "max_rewrite_rounds": 2,
   "max_rewrite_candidates": 3,
   "memory_call_limit": 6,
+  "verification_enabled": false,
+  "verification_mode": "static",
+  "verification_mandatory_domains": [
+    "时事社会",
+    "财经商业"
+  ],
+  "verification_mandatory_keywords": [
+    "治愈",
+    "疗效",
+    "诊断",
+    "处方",
+    "剂量",
+    "用药",
+    "确诊",
+    "手术",
+    "收益",
+    "涨幅",
+    "涨停",
+    "回报",
+    "理财",
+    "基金",
+    "股票",
+    "利率",
+    "判刑",
+    "判决",
+    "量刑",
+    "起诉",
+    "拘留",
+    "立案",
+    "伤亡",
+    "遇难",
+    "死亡",
+    "事故",
+    "地震",
+    "火灾",
+    "洪水",
+    "暴雨",
+    "灾害"
+  ],
+  "verification_require_whitelist": true,
   "extra": {
     "business_policy": {
       "status": "approved",
-      "version": "policy-v0.1",
+      "version": "policy-v0.2",
       "approved_at": "2026-10-31",
       "counting": "prefix_plus_body_total_le_max_chars",
       "rules": [
@@ -81,6 +121,14 @@
           "trigger": "标题给出医疗、用药、投资、法律等专业结论，或涉及灾害伤亡的具体数字/具体人物，而材料未提供可核验依据",
           "text": "上述情形不直接判违规：需要人判断结论强度是否与材料相称、是否需要限定或暂缓。程序与模型都不得单方面放行。",
           "action_reason": "风险取决于上下文，必须人看一眼"
+        },
+        {
+          "rule_id": "P9",
+          "name": "人身攻击用语",
+          "action": "rewrite",
+          "trigger": "标题直接出现针对具体个人的人身攻击、贬损或羞辱用语；以「网友说/网友评」的转述结构把这类词搬进标题同样算命中（如「欠扁」「脑残」「弱智」「丑八怪」「渣男」「巨婴」）",
+          "text": "标题不得直接使用人身攻击、贬损或羞辱个人的措辞，也不得以转述网友评价的方式把攻击词复制进标题——读者在标题里看到的就是这个词。事件本身的争议可以写，但须用不复制攻击内容的表述：网友恶评、网友差评、网友嘲讽、争议评价，或只写受访内容。",
+          "action_reason": "争议与对照是正当看点，攻击词不是；抽象化后看点仍在，直接判毙会丢掉可交付内容"
         }
       ]
     }

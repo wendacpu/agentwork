@@ -68,6 +68,8 @@ class VerificationResult:
     sources: list[str] = field(default_factory=list)   # 支持或反驳的权威来源 URL
     confidence: float = 0.0
     query: str = ""
+    # 模型判定为 refuted，但独立来源或置信度未达拦截阈值：保留判定不丢信息，下游降级为限定表达。
+    downgraded: bool = False
 
 
 @dataclass
@@ -100,7 +102,8 @@ class SemanticUnit:
     role_in_video: str = ""
     # 归纳的断言级别：grounded=关系性归纳能由单元内 claim 组合直接推出；
     # inferred=模型解读、claim 仅部分支撑；speculative=无 claim 支撑（禁止作确定看点）
-    grounding: str = "grounded"
+    grounding: str = "unknown"
+    semantic_use: str = "unknown"
     # 印证源是一手证据（ASR/OCR/帧）：{status∈consistent/partial/conflict/unverified, evidence_ids, notes}
     # description/caption/searchDesc 是理解线索，不作印证源
     corroboration: dict[str, Any] = field(default_factory=dict)
@@ -173,6 +176,9 @@ class ClaimDecision:
     source_evidence_refs: list[str] = field(default_factory=list)
     # D02「暂缓核验」：不进入可写集合，但保留结构化的核验任务
     verification_required: bool = False
+    # 明确区分「标题必须表达」与「出现时不能写错」；旧数据仍保留原列表。
+    conditional_constraints: list[str] = field(default_factory=list)
+    factual_context: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -210,6 +216,9 @@ class Highlight:
     # 钩子类型：information(信息价值)/suspense(悬念)/identity(身份认同)/conflict(冲突争议)/emotion(情绪共鸣)
     # 与观看价值(value)并列为看点的一等维度——价值回答"值不值得写"，钩子回答"勾不勾人"
     hook_type: str = ""
+    relation: str = ""
+    # 所属主旨契约：同主旨备选共享同一 thesis_id；空表示未绑定（旧数据）。
+    thesis_id: str = ""
 
 
 @dataclass

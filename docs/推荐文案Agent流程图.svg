@@ -1,0 +1,264 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3360" height="2300" viewBox="0 0 3360 2300" role="img" aria-labelledby="title"><title id="title">推荐文案 Agent 流程图</title><defs><marker id="m-0B6B61" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#0B6B61"/></marker><marker id="m-15202B" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#15202B"/></marker><marker id="m-7C3AED" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#7C3AED"/></marker><marker id="m-4A5A6A" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#4A5A6A"/></marker><marker id="m-334556" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#334556"/></marker><marker id="m-1D4ED8" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#1D4ED8"/></marker><marker id="m-D48A00" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#D48A00"/></marker><marker id="m-4E6485" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#4E6485"/></marker><marker id="m-B42318" viewBox="0 0 12 10" markerWidth="12" markerHeight="10" refX="11" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L11,5 L1,8.5 Z" fill="#B42318"/></marker><style>text{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;}</style></defs>
+<rect x="0" y="0" width="3360" height="2300" rx="0" fill="#F2F4F6" stroke="#F2F4F6" stroke-width="2"/>
+<text x="60" y="88" font-size="50" fill="#15202B" font-weight="700" text-anchor="start">推荐文案 Agent 流程图</text>
+<rect x="1760" y="30" width="1515" height="75" rx="10" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.3"/>
+<rect x="2760" y="52" width="25" height="25" rx="3" fill="#FFEDB8" stroke="#D48A00" stroke-width="1.5"/>
+<text x="2805" y="76" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start">人工确认</text>
+<rect x="40" y="140" width="3280" height="180" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="187" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">业务层</text>
+<rect id="input" x="330" y="175" width="820" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="214" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="input">视频任务</text>
+<text x="354" y="252" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="input">原标题、语音转写、画面文字、已有描述</text>
+<rect id="human" x="1260" y="175" width="870" height="110" rx="8" fill="#FFEDB8" stroke="#D48A00" stroke-width="1.8"/>
+<text x="1284" y="214" font-size="30" fill="#4A2F00" font-weight="650" text-anchor="start" data-owner="human">人工审核</text>
+<text x="1284" y="252" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="human">确认采用，或记录问题</text>
+<rect id="verify" x="2220" y="175" width="870" height="110" rx="8" fill="#FFEDB8" stroke="#D48A00" stroke-width="1.8"/>
+<text x="2244" y="214" font-size="30" fill="#4A2F00" font-weight="650" text-anchor="start" data-owner="verify">人工核实</text>
+<text x="2244" y="252" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="verify">核实事实与风险，记录处理意见</text>
+<rect x="40" y="350" width="3280" height="360" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="397" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">Workflow 层</text>
+<rect id="prepare" x="330" y="390" width="820" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="429" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="prepare">任务编排</text>
+<text x="354" y="467" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="prepare">组装当前材料、适用规则与上下文</text>
+<rect id="router" x="1490" y="390" width="1600" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1514" y="429" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="router">汇总校验与评审，决定处理去向</text>
+<text x="1514" y="467" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="router">主旨分歧按依据处理；未决事实或风险不自动放行</text>
+<rect id="route-ready" x="1260" y="555" width="430" height="135" rx="8" fill="#FFEDB8" stroke="#D48A00" stroke-width="1.8"/>
+<text x="1284" y="594" font-size="28" fill="#4A2F00" font-weight="650" text-anchor="start" data-owner="route-ready">可送审 → 择优推荐</text>
+<text x="1284" y="632" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="route-ready">文案、备选与依据交人工</text>
+<rect id="route-rewrite" x="1760" y="555" width="430" height="135" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1784" y="594" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="route-rewrite">可修复 → 定向重写</text>
+<text x="1784" y="632" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="route-rewrite">表达回 G3；看点回 G1</text>
+<text x="1784" y="671" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="route-rewrite">无可送审时处理，最多 2 轮</text>
+<rect id="route-pending" x="2260" y="555" width="430" height="135" rx="8" fill="#FFEDB8" stroke="#D48A00" stroke-width="1.8"/>
+<text x="2284" y="594" font-size="28" fill="#4A2F00" font-weight="650" text-anchor="start" data-owner="route-pending">存疑 → 人工核实</text>
+<text x="2284" y="632" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="route-pending">保留待核候选与证据</text>
+<rect id="route-stop" x="2760" y="555" width="430" height="135" rx="8" fill="white" stroke="#B42318" stroke-width="1.8"/>
+<text x="2784" y="594" font-size="28" fill="#B42318" font-weight="650" text-anchor="start" data-owner="route-stop">无法交付 → 停止</text>
+<text x="2784" y="632" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="route-stop">无可写、失败或预算耗尽</text>
+<rect x="40" y="750" width="3280" height="835" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="797" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">Agent /</text>
+<text x="66" y="837" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">LLM 层</text>
+<rect x="300" y="780" width="870" height="775" rx="16" fill="#E8F2EF" stroke="#8DB8AF" stroke-width="2"/>
+<text x="326" y="833" font-size="44" fill="#0B6B61" font-weight="700" text-anchor="start">01</text>
+<text x="412" y="829" font-size="34" fill="#15202B" font-weight="650" text-anchor="start">视频理解 Agent</text>
+<path d="M324,854 H1146" stroke="#8DB8AF" stroke-width="1.8"/>
+<rect x="1260" y="780" width="870" height="775" rx="16" fill="#E8F2EF" stroke="#8DB8AF" stroke-width="2"/>
+<text x="1286" y="833" font-size="44" fill="#0B6B61" font-weight="700" text-anchor="start">02</text>
+<text x="1372" y="829" font-size="34" fill="#15202B" font-weight="650" text-anchor="start">文案生成 Agent</text>
+<path d="M1284,854 H2106" stroke="#8DB8AF" stroke-width="1.8"/>
+<rect x="2220" y="780" width="870" height="775" rx="16" fill="#E8F2EF" stroke="#8DB8AF" stroke-width="2"/>
+<text x="2246" y="833" font-size="44" fill="#0B6B61" font-weight="700" text-anchor="start">03</text>
+<text x="2332" y="829" font-size="34" fill="#15202B" font-weight="650" text-anchor="start">文案评审 Agent</text>
+<path d="M2244,854 H3066" stroke="#8DB8AF" stroke-width="1.8"/>
+<rect id="u-in" x="330" y="875" width="810" height="70" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="914" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="u-in">输入：当前视频材料</text>
+<rect id="u1" x="330" y="980" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="1019" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="u1">U1　整理视频内容</text>
+<text x="354" y="1057" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="u1">区分整体主题、事件关系与局部细节</text>
+<rect id="u2" x="330" y="1110" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="1149" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="u2">U2　提取事实与证据</text>
+<text x="354" y="1187" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="u2">关联材料位置，保留冲突与缺失</text>
+<rect id="u3" x="330" y="1240" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="1279" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="u3">U3　判断可写边界</text>
+<text x="354" y="1317" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="u3">可写保留；限定带出；待核与不可写不用于生成</text>
+<polygon id="u-valid" points="620,1337.5 870.0,1390 620,1442.5 370.0,1390" fill="white" stroke="#15202B" stroke-width="1.8"/>
+<text x="620" y="1400.0" font-size="28" fill="#15202B" font-weight="650" text-anchor="middle">仍有可写内容？</text>
+<rect id="u-stop" x="940" y="1340" width="200" height="100" rx="8" fill="white" stroke="#B42318" stroke-width="1.8"/>
+<text x="964" y="1379" font-size="28" fill="#B42318" font-weight="650" text-anchor="start" data-owner="u-stop">无可写</text>
+<text x="964" y="1417" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="u-stop">停止或待核</text>
+<rect id="u-out" x="330" y="1480" width="810" height="55" rx="27.5" fill="#15202B" stroke="#15202B" stroke-width="2"/>
+<text x="735.0" y="1517.5" font-size="28" fill="white" font-weight="650" text-anchor="middle" data-owner="u-out">视频内容、事实证据、可写边界</text>
+<rect id="g-in" x="1290" y="875" width="810" height="70" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1314" y="914" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="g-in">输入：视频内容、证据、边界与适用规则</text>
+<rect id="g1" x="1290" y="980" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1314" y="1019" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="g1">G1　确定主旨与核心看点</text>
+<text x="1314" y="1057" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="g1">绑定核心证据，保留必要信息与限定</text>
+<rect id="g2" x="1290" y="1110" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1314" y="1149" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="g2">G2　检索案例并选择表达方式</text>
+<text x="1314" y="1187" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="g2">命中参考经验；未命中按当前材料生成</text>
+<rect id="g3" x="1290" y="1240" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1314" y="1279" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="g3">G3　生成或定向重写候选文案</text>
+<text x="1314" y="1317" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="g3">同一主旨、不同表达；不靠删掉重点过关</text>
+<rect x="1290" y="1370" width="250" height="70" rx="7" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1415" y="1414" font-size="28" fill="#15202B" font-weight="600" text-anchor="middle">原题锚定重述</text>
+<rect x="1570" y="1370" width="250" height="70" rx="7" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1695" y="1414" font-size="28" fill="#15202B" font-weight="600" text-anchor="middle">主旨直接概括</text>
+<rect x="1850" y="1370" width="250" height="70" rx="7" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1975" y="1414" font-size="28" fill="#15202B" font-weight="600" text-anchor="middle">核心钩子表达</text>
+<rect id="g-out" x="1290" y="1480" width="810" height="55" rx="27.5" fill="#15202B" stroke="#15202B" stroke-width="2"/>
+<text x="1695.0" y="1517.5" font-size="28" fill="white" font-weight="650" text-anchor="middle" data-owner="g-out">最多 3 条候选及依据；缺槽不补造</text>
+<rect id="r-in" x="2250" y="875" width="810" height="70" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="914" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="r-in">输入：候选、原材料、规则与校验结果</text>
+<rect id="r1" x="2250" y="980" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1019" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="r1">R1　独立复核视频主旨</text>
+<text x="2274" y="1057" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="r1">不把生成侧主旨直接当作标准答案</text>
+<rect id="r2" x="2250" y="1110" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1149" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="r2">R2　核对事实与业务规则</text>
+<text x="2274" y="1187" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="r2">检查证据、必要限定、来源归属与政策</text>
+<rect id="r3" x="2250" y="1240" width="810" height="95" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1279" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="r3">R3　核对看点兑现与表达质量</text>
+<text x="2274" y="1317" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="r3">检查核心覆盖、清晰度、信息价值与吸引力</text>
+<rect id="r4" x="2250" y="1370" width="810" height="70" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1409" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="r4">R4　记录逐条问题与回退环节</text>
+<rect id="r-out" x="2250" y="1480" width="810" height="55" rx="27.5" fill="#15202B" stroke="#15202B" stroke-width="2"/>
+<text x="2655.0" y="1517.5" font-size="28" fill="white" font-weight="650" text-anchor="middle" data-owner="r-out">评审结论、问题、依据与处理建议</text>
+<rect x="40" y="1620" width="3280" height="250" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="1667" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">工具层</text>
+<rect id="read" x="330" y="1660" width="390" height="155" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="1699" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="read">读取与整理材料</text>
+<text x="354" y="1737" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="read">读取转写、画面文字</text>
+<text x="354" y="1776" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="read">与视频描述</text>
+<rect id="external-search" x="750" y="1660" width="390" height="155" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="774" y="1699" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="external-search">外部检索</text>
+<text x="774" y="1737" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="external-search">按需核查现实断言</text>
+<text x="774" y="1776" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="external-search">返回来源与核查结果</text>
+<rect id="retrieve" x="1260" y="1660" width="440" height="155" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1284" y="1699" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="retrieve">案例检索</text>
+<text x="1284" y="1737" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="retrieve">按条件读取确认案例</text>
+<rect id="check" x="1760" y="1660" width="370" height="155" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1784" y="1699" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="check">固定项校验</text>
+<text x="1784" y="1737" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="check">长度、前缀、引用</text>
+<rect id="log" x="2250" y="1660" width="840" height="155" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1699" font-size="28" fill="#15202B" font-weight="650" text-anchor="start" data-owner="log">运行与异常记录</text>
+<text x="2274" y="1737" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="log">保存各节点输入输出、版本及停止原因</text>
+<rect x="40" y="1910" width="3280" height="150" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="1957" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">规则层</text>
+<rect id="rules-u" x="330" y="1930" width="810" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="354" y="1969" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="rules-u">品类规则与证据边界</text>
+<text x="354" y="2007" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="rules-u">用于 U3</text>
+<rect id="rules-g" x="1260" y="1930" width="870" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="1284" y="1969" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="rules-g">主旨保持、表达策略与展示要求</text>
+<text x="1284" y="2007" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="rules-g">用于 G1—G3 与程序校验</text>
+<rect id="rules-r" x="2250" y="1930" width="840" height="110" rx="8" fill="white" stroke="#334556" stroke-width="1.8"/>
+<text x="2274" y="1969" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="rules-r">事实、政策、内容兑现与质量标准</text>
+<text x="2274" y="2007" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="rules-r">用于 R1—R4</text>
+<rect x="40" y="2100" width="3280" height="160" rx="16" fill="#FAFBFC" stroke="#C5CED8" stroke-width="1.5"/>
+<text x="66" y="2147" font-size="29" fill="#4A5A6A" font-weight="650" text-anchor="start">数据资产</text>
+<rect id="case-bank" x="330" y="2120" width="810" height="110" rx="8" fill="#E3E9F3" stroke="#4E6485" stroke-width="1.8"/>
+<text x="354" y="2159" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="case-bank">Memory 案例库</text>
+<text x="354" y="2197" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="case-bank">确认案例、适用场景与处理经验</text>
+<path d="M332,2130 H1138" stroke="#4E6485" stroke-width="1.3"/>
+<rect id="regression" x="1260" y="2120" width="870" height="110" rx="8" fill="#E3E9F3" stroke="#4E6485" stroke-width="1.8"/>
+<text x="1284" y="2159" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="regression">评测与回归样本</text>
+<text x="1284" y="2197" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="regression">原案例、同类变体与历史正确案例</text>
+<path d="M1262,2130 H2128" stroke="#4E6485" stroke-width="1.3"/>
+<rect id="records" x="2250" y="2120" width="840" height="110" rx="8" fill="#E3E9F3" stroke="#4E6485" stroke-width="1.8"/>
+<text x="2274" y="2159" font-size="30" fill="#15202B" font-weight="650" text-anchor="start" data-owner="records">任务与反馈记录</text>
+<text x="2274" y="2197" font-size="28" fill="#4A5A6A" font-weight="450" text-anchor="start" data-owner="records">候选、人工判定、问题与版本</text>
+<path d="M2252,2130 H3088" stroke="#4E6485" stroke-width="1.3"/>
+<path d="M1790,66 L1855,66" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1790,66 L1855,66" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2050,66 L2115,66" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2050,66 L2115,66" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M2400,66 L2465,66" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2400,66 L2465,66" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round" stroke-dasharray="9 6" marker-end="url(#m-7C3AED)"/>
+<path d="M2990,66 L3055,66" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2990,66 L3055,66" fill="none" stroke="#D48A00" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-D48A00)"/>
+<path d="M2290,500 L2290,527" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2290,500 L2290,527" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round"/>
+<path d="M1475,527 L2975,527" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1475,527 L2975,527" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round"/>
+<path d="M1475,527 L1475,555" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1475,527 L1475,555" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1975,527 L1975,555" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1975,527 L1975,555" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2475,527 L2475,555" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2475,527 L2475,555" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2975,527 L2975,555" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2975,527 L2975,555" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1260,625 L1215,625 L1215,230 L1260,230" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1260,625 L1215,625 L1215,230 L1260,230" fill="none" stroke="#D48A00" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-D48A00)"/>
+<path d="M2690,625 L2720,625 L2720,535 L3210,535 L3210,230 L3090,230" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2690,625 L2720,625 L2720,535 L3210,535 L3210,230 L3090,230" fill="none" stroke="#D48A00" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-D48A00)"/>
+<path d="M740,285 L740,390" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M740,285 L740,390" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M735,945 L735,980" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M735,945 L735,980" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M735,1075 L735,1110" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M735,1075 L735,1110" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M735,1205 L735,1240" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M735,1205 L735,1240" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M620,1335 L620,1337" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M620,1335 L620,1337" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M620,1442 L620,1480" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M620,1442 L620,1480" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M870,1390 L940,1390" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M870,1390 L940,1390" fill="none" stroke="#B42318" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-B42318)"/>
+<path d="M1695,945 L1695,980" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,945 L1695,980" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1695,1075 L1695,1110" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1075 L1695,1110" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1695,1205 L1695,1240" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1205 L1695,1240" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1695,1335 L1695,1350" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1335 L1695,1350" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round"/>
+<path d="M1415,1350 L1975,1350" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1415,1350 L1975,1350" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round"/>
+<path d="M1415,1350 L1415,1370" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1415,1350 L1415,1370" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1415,1440 L1415,1480" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1415,1440 L1415,1480" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1695,1350 L1695,1370" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1350 L1695,1370" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1695,1440 L1695,1480" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1440 L1695,1480" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1975,1350 L1975,1370" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1975,1350 L1975,1370" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1975,1440 L1975,1480" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1975,1440 L1975,1480" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2655,945 L2655,980" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2655,945 L2655,980" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2655,1075 L2655,1110" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2655,1075 L2655,1110" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2655,1205 L2655,1240" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2655,1205 L2655,1240" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2655,1335 L2655,1370" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2655,1335 L2655,1370" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2655,1440 L2655,1480" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2655,1440 L2655,1480" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1140,1507 L1200,1507 L1200,910 L1290,910" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1140,1507 L1200,1507 L1200,910 L1290,910" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M3060,1507 L3260,1507 L3260,445 L3090,445" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M3060,1507 L3260,1507 L3260,445 L3090,445" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M1870,690 L1870,740 L2160,740 L2160,1027 L2100,1027" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1870,690 L1870,740 L2160,740 L2160,1027 L2100,1027" fill="none" stroke="#1D4ED8" stroke-width="2" stroke-linejoin="round" stroke-dasharray="9 6" marker-end="url(#m-1D4ED8)"/>
+<path d="M2010,690 L2010,710 L2190,710 L2190,1287 L2100,1287" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2010,690 L2010,710 L2190,710 L2190,1287 L2100,1287" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round" stroke-dasharray="9 6" marker-end="url(#m-7C3AED)"/>
+<path d="M330,445 L260,445 L260,1737 L330,1737" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M330,445 L260,445 L260,1737 L330,1737" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M330,1790 L290,1790 L290,910 L330,910" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M330,1790 L290,1790 L290,910 L330,910" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M1140,1180 L1235,1180 L1235,1620 L945,1620 L945,1660" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1140,1180 L1235,1180 L1235,1620 L945,1620 L945,1660" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M945,1815 L945,1840 L1170,1840 L1170,1287 L1140,1287" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M945,1815 L945,1840 L1170,1840 L1170,1287 L1140,1287" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M1700,1735 L1730,1735 L1730,1560 L1245,1560 L1245,1140 L1290,1140" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1700,1735 L1730,1735 L1730,1560 L1245,1560 L1245,1140 L1290,1140" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<path d="M1695,1535 L1695,1590 L1945,1590 L1945,1660" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M1695,1535 L1695,1590 L1945,1590 L1945,1660" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M2130,1737 L2140,1737 L2140,910 L2250,910" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M2130,1737 L2140,1737 L2140,910 L2250,910" fill="none" stroke="#15202B" stroke-width="2" stroke-linejoin="round" marker-end="url(#m-15202B)"/>
+<path d="M3090,1740 L3160,1740 L3160,2175 L3090,2175" fill="none" stroke="#F2F4F6" stroke-width="6" stroke-linejoin="round"/>
+<path d="M3090,1740 L3160,1740 L3160,2175 L3090,2175" fill="none" stroke="#4A5A6A" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 6" marker-end="url(#m-4A5A6A)"/>
+<text x="1875" y="76" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">主流程</text>
+<text x="2135" y="76" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">工具与数据</text>
+<text x="2485" y="76" font-size="28" fill="#7C3AED" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">重写回退</text>
+<text x="3075" y="76" font-size="28" fill="#D48A00" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">人工流转</text>
+<text x="1243" y="520" font-size="28" fill="#D48A00" font-weight="550" text-anchor="start" transform="rotate(-90 1243 520)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">文案与依据</text>
+<text x="3240" y="510" font-size="28" fill="#D48A00" font-weight="550" text-anchor="start" transform="rotate(-90 3240 510)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">疑点与证据</text>
+<text x="760" y="345" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">视频材料</text>
+<text x="650" y="1468" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">有</text>
+<text x="890" y="1375" font-size="28" fill="#B42318" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">无</text>
+<text x="1228" y="1120" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" transform="rotate(-90 1228 1120)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">内容、证据与边界</text>
+<text x="3290" y="1325" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" transform="rotate(-90 3290 1325)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">评审结论与问题</text>
+<text x="1730" y="733" font-size="28" fill="#1D4ED8" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">看点问题 → G1</text>
+<text x="2215" y="1190" font-size="28" fill="#7C3AED" font-weight="550" text-anchor="start" transform="rotate(-90 2215 1190)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">表达问题 → G3</text>
+<text x="285" y="1460" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" transform="rotate(-90 285 1460)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">任务材料</text>
+<text x="830" y="1610" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">待核查断言</text>
+<text x="750" y="1832" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">来源与核查结果</text>
+<text x="1268" y="1490" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" transform="rotate(-90 1268 1490)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">相关案例</text>
+<text x="1740" y="1580" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">候选与依据</text>
+<text x="2124" y="1490" font-size="28" fill="#15202B" font-weight="550" text-anchor="start" transform="rotate(-90 2124 1490)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">候选与校验结果</text>
+<text x="3204" y="2020" font-size="28" fill="#4A5A6A" font-weight="550" text-anchor="start" transform="rotate(-90 3204 2020)" paint-order="stroke" stroke="#F2F4F6" stroke-width="7" stroke-linejoin="round">运行与反馈</text>
+</svg>

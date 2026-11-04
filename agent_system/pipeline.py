@@ -15,11 +15,11 @@ from typing import Any
 
 from .config import RunConfig
 from .data import Dataset, assess_material
-from .labels import MIN_BODY_BUDGET, body_budget, extract_inline_prefixes, normalize_prefix_labels, render_labels, render_title, required_prefixes, self_declared_prefixes
+from .labels import MIN_BODY_BUDGET, body_budget, extract_inline_prefixes, normalize_prefix_labels, render_labels, render_title, required_prefixes, route_identity, self_declared_prefixes
 from .memory import MemoryStore
 from .signals import extract_risk_signals, check_signal_constraints, unsupported_numeric_facts, signal_review_reasons
 from .model import ModelAdapter, ModelError
-from .rules import load_common_rule_ids, load_rule_bundle, load_rules, rubric
+from .rules import load_common_rule_ids, load_rule_bundle, load_rules, prompt_text_from_context, rubric
 from .prompts import prompt_for
 from .schemas import GATE_IDS, QUALITY_IDS, validate_review
 from .storage import Storage
@@ -818,15 +818,38 @@ def _apply_conflict_gate(understanding: Any, boundary: Any) -> Any:
     return boundary
 
 
+def _foreign_evidence_ratio(refs: list[str]) -> float:
+    """证据文本的外文占比（ASCII 字母字符 ÷ 全部非空白字符）。
+
+    V 集 2026-11-04 实况：英文解说视频的 ASR/OCR 是英文，中文 claim 的数字词
+    （「数小时」）对英文证据（"Do it for hours every day"）做词法比对必然失败，
+    supported 的 claim 被数字守卫整条 excluded。跨语言词法测不出，不能据此否决。
+    """
+    if not refs:
+        return 0.0
+    letters = sum(1 for t in refs for ch in str(t or "") if ch.isascii() and ch.isalpha())
+    chars = sum(1 for t in refs for ch in str(t or "") if not ch.isspace())
+    return letters / chars if chars else 0.0
+
+
 def _apply_numeric_conflict_gate(video: Any, understanding: Any, boundary: Any) -> Any:
-    """数字必须能落到所引用的原始文本，不恢复被其他守卫排除的陈述。"""
+    """数字必须能落到所引用的原始文本，不恢复被其他守卫排除的陈述。
+
+    跨语言证据（外文占比 > 50%）跳过词法核验：中文数字词对英文 ASR/OCR
+    永远匹配不上，据此排除是系统性误伤（人体科学视频 c7 实况：6 条证据、
+    evidence_status=supported，仍被整条 excluded）。
+    """
     evidence = {e.evidence_id: e for e in video.evidence}
     decisions = {d.claim_id: d for d in boundary.decisions}
     for claim in understanding.claims:
         refs = [evidence[r].text for r in claim.evidence_refs if r in evidence and evidence[r].quality not in {"model_derived_uncalibrated", "unverified_source_metadata"} and evidence[r].field != "frame"]
-        unsupported = unsupported_numeric_facts(claim.text, refs)
         decision = decisions.get(claim.claim_id)
-        if not unsupported or decision is None or decision.decision != "usable":
+        if _foreign_evidence_ratio(refs) > 0.5:
+            if decision is not None and decision.decision in {"usable", "limited"}:
+                decision.reason = (decision.reason or "") + " | 数字证据守卫跳过：证据为外文，跨语言无法词法核验"
+            continue
+        unsupported = unsupported_numeric_facts(claim.text, refs)
+        if not unsupported or decision is None or decision.decision not in {"usable", "limited"}:
             continue
         decision.decision = "excluded"
         decision.verification_required = True
@@ -871,11 +894,8 @@ def _iter_boundary_layers(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _boundary_pending_ids(layer: dict[str, Any]) -> set[str]:
-    for key in BOUNDARY_PENDING_KEYS:
-        value = layer.get(key)
-        if isinstance(value, list):
-            return {str(x) for x in value if str(x)}
-    return set()
+    return {str(x) for key in BOUNDARY_PENDING_KEYS
+            if isinstance(layer.get(key), list) for x in layer[key] if isinstance(x, str) and x}
 
 
 def collect_boundary_groups(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -886,16 +906,16 @@ def collect_boundary_groups(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for layer in _iter_boundary_layers(raw):
         for decision, aliases in BOUNDARY_GROUP_ALIASES:
-            values = next((layer[a] for a in aliases if isinstance(layer.get(a), list)), None)
-            if values is None:
-                continue
-            for cid in values:
-                cid = str(cid)
-                if not cid:
+            for alias in aliases:
+                values = layer.get(alias)
+                if not isinstance(values, list):
                     continue
-                current = merged.setdefault(cid, {})
-                if _BOUNDARY_DECISION_RANK[decision] >= _BOUNDARY_DECISION_RANK.get(str(current.get("decision") or ""), -1):
-                    current["decision"] = decision
+                for cid in values:
+                    if not isinstance(cid, str) or not cid:
+                        continue
+                    current = merged.setdefault(cid, {})
+                    if _BOUNDARY_DECISION_RANK[decision] >= _BOUNDARY_DECISION_RANK.get(str(current.get("decision") or ""), -1):
+                        current["decision"] = decision
         pending = _boundary_pending_ids(layer)
         if isinstance(layer.get("verification_required"), bool) and layer["verification_required"]:
             # 布尔式 verification_required=true 只在 limited 组内联时才是 claim 级信号，
@@ -923,9 +943,25 @@ def collect_boundary_objects(raw: dict[str, Any]) -> list[dict[str, Any]]:
                 if not isinstance(item, dict):
                     continue
                 cid = item.get("claim_id") or item.get("id")
-                if cid is None or str(cid) in ordered:
+                if cid is None:
                     continue
-                ordered[str(cid)] = item
+                cid = str(cid)
+                # 旧别名与新字段可能跨不同包装同时出现；合并前统一，不丢任何限定。
+                if isinstance(item.get("limits"), list):
+                    item = {**item, "required_limits": list(dict.fromkeys([*(item.get("required_limits") or []), *item["limits"]]))}
+                if cid not in ordered:
+                    ordered[cid] = {**item, "claim_id": cid}
+                    continue
+                existing = ordered[cid]
+                previous = _boundary_item_decision(existing)
+                incoming = _boundary_item_decision(item)
+                if incoming and (not previous or _BOUNDARY_DECISION_RANK[incoming] > _BOUNDARY_DECISION_RANK[previous]):
+                    existing["decision"] = incoming
+                for key in ("required_limits", "conditional_constraints", "factual_context", "forbidden_inferences", "source_evidence_refs", "rule_ids"):
+                    if isinstance(item.get(key), list):
+                        existing[key] = list(dict.fromkeys([*(existing.get(key) or []), *item[key]]))
+                if item.get("verification_required") or item.get("pending_verification") or _item_requires_verification(item):
+                    existing["verification_required"] = True
     return list(ordered.values())
 
 
@@ -988,6 +1024,11 @@ def _normalize_boundary_decision(value: Any) -> str | None:
     return None
 
 
+def _item_requires_verification(item: dict[str, Any]) -> bool:
+    return any(str(item.get(key) or "").strip().lower() in {"verification_required", "pending_verification", "needs_verification"}
+               for key in ("decision", "status", "verdict"))
+
+
 def _boundary_item_decision(item: dict[str, Any]) -> str | None:
     for key in ("decision", "status", "verdict", "usable"):
         if key in item:
@@ -1035,7 +1076,7 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
     if isinstance(items, dict):
         items = [{"claim_id": claim_id, **(item if isinstance(item, dict) else {})} for claim_id, item in items.items()]
     # 只出现在分组里、没有完整对象的 claim：补一条最小对象，也不许把它的决策丢掉。
-    known_ids = {str(it.get("claim_id")) for it in items if isinstance(it, dict) and it.get("claim_id")}
+    known_ids = {str(it.get("claim_id") or it.get("id")) for it in items if isinstance(it, dict) and (it.get("claim_id") or it.get("id"))}
     for cid, group in groups.items():
         if cid not in known_ids:
             items.append({"claim_id": cid, "_from_group": group})
@@ -1045,21 +1086,24 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
         if not isinstance(item, dict):
             continue
         item = dict(item)
-        cid = str(item.get("claim_id") or f"c{i+1}")
+        cid = str(item.get("claim_id") or item.get("id") or "")
+        if not cid:
+            continue
         group = item.pop("_from_group", None) or groups.get(cid) or {}
         refs = item.get("evidence_refs") or item.get("evidence_ids") or []
         # 边界节点经常不回填 evidence_refs：引用关系在理解阶段已经建立，
         # 这里直接从对应 claim 继承，而不是事后判"引用列表为空"把整条任务废掉。
         if not refs and claim_evidence:
             refs = list(claim_evidence.get(cid) or [])
-        decision = _boundary_item_decision(item) or _normalize_boundary_decision(group.get("decision"))
+        choices = [d for d in (_boundary_item_decision(item), _normalize_boundary_decision(group.get("decision"))) if d]
+        decision = max(choices, key=_BOUNDARY_DECISION_RANK.get) if choices else None
         if decision is None:
             # 模型对这条 claim 完全没表态。excluded 是保守兜底，但必须留痕：
             # 静默兜底会让「模型漏答」看起来像「材料真的不可用」，整任务白跑还没人知道。
             missing_decision_ids.append(cid)
             decision = "excluded"
         decisions.append(ClaimDecision(
-            claim_id=cid, supported_statement=item.get("supported_statement") or item.get("statement") or item.get("text") or (claim_texts or {}).get(str(item.get("claim_id") or f"c{i+1}")),
+            claim_id=cid, supported_statement=item.get("supported_statement") or item.get("statement") or item.get("text") or (claim_texts or {}).get(cid),
             decision=decision, evidence_refs=[str(x) for x in refs],
             required_limits=[str(x) for x in (item.get("required_limits") or item.get("limits") or group.get("required_limits") or summary_limits.get(cid) or [])],
             forbidden_inferences=[str(x) for x in (item.get("forbidden_inferences") or group.get("forbidden_inferences") or summary_forbidden.get(cid) or [])],
@@ -1074,7 +1118,9 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             attribution_required=bool(item.get("attribution_required", item.get("required_source_phrase") or item.get("required_attribution") or (item.get("assertion_decision") == "source_asserted" and item.get("source_decision") in {"identified_official", "identified_relay"}))),
             required_source_phrase=item.get("required_source_phrase") or item.get("required_attribution"),
             source_evidence_refs=[str(x) for x in (item.get("source_evidence_refs") or item.get("source_refs") or [])],
-            verification_required=bool(item.get("verification_required") or item.get("pending_verification") or group.get("verification_required")),
+            conditional_constraints=[str(x) for x in (item.get("conditional_constraints") or [])],
+            factual_context=[str(x) for x in (item.get("factual_context") or [])],
+            verification_required=bool(item.get("verification_required") or item.get("pending_verification") or group.get("verification_required") or _item_requires_verification(item)),
         ))
     units_items: Any = []
     for layer in layers:
@@ -1101,12 +1147,17 @@ def _normalize_boundary(raw: dict[str, Any], claim_texts: dict[str, str] | None 
             required_source_phrase=item.get("required_source_phrase") or item.get("required_attribution"),
             reason=str(item.get("reason") or item.get("rationale") or ""),
         ))
+    # 输入中整条缺失同样是漏答；不得按位置补配或视为业务拒绝。
+    if claim_texts is not None:
+        present = {d.claim_id for d in decisions}
+        missing_decision_ids.extend(cid for cid in claim_texts if cid not in present)
+    missing_decision_ids = sorted(set(missing_decision_ids))
     unresolved = raw.get("unresolved_issues") if isinstance(raw.get("unresolved_issues"), list) else []
     if missing_decision_ids:
         unresolved = list(unresolved) + [{
             "code": BOUNDARY_DECISION_MISSING,
             "claim_ids": sorted(missing_decision_ids),
-            "message": f"模型未对 {len(missing_decision_ids)} 条 claim 给出决策，已按 excluded 兜底并留痕。",
+            "message": f"模型未对 {len(missing_decision_ids)} 条 claim 给出决策；这些 claim 不得进入可写集合。", 
         }]
     return BoundarySet(decisions=decisions, unresolved_issues=unresolved, global_requirements=global_requirements, unit_decisions=unit_decisions)
 
@@ -1206,6 +1257,43 @@ def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: st
         candidate["rendered_title"] = render_title(candidate)
         candidate["title_length"] = len(candidate["rendered_title"])
         out.append(candidate)
+    return out
+
+
+def _fill_compress_draft(draft: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """压缩草案只带文字：引用、槽位、主旨、前缀一律继承父候选。
+
+    模型这一步看不到 video/claims/boundary 全文，让它自己报 claim_ids 只会逼它
+    编造；而引用错了会被判 G4_INVALID_REFERENCE，等于把一次纯文字压缩变成结构
+    缺陷。继承父候选是唯一安全的做法：压缩不改绑定。
+    """
+    out = dict(draft or {})
+    items = []
+    for item in out.get("candidates") or []:
+        if not isinstance(item, dict):
+            continue
+        headline = (item.get("headline") or item.get("candidate_title") or item.get("title_text")
+                    or item.get("title") or item.get("copy") or item.get("draft_text") or item.get("text"))
+        if not headline:
+            continue
+        items.append({
+            "candidate_id": source.get("candidate_id"),
+            "headline": headline,
+            "prefix_labels": list(source.get("prefix_labels") or []),
+            "highlight_id": source.get("highlight_id"),
+            "claim_ids": list(source.get("claim_ids") or []),
+            "evidence_ids": list(source.get("evidence_ids") or []),
+            "unit_id": source.get("unit_id"),
+            "slot_id": source.get("slot_id"),
+            "thesis_id": source.get("thesis_id"),
+            "expression_strategy": item.get("strategy") or source.get("expression_strategy") or "直接描述",
+            "qualifiers_used": item.get("qualifiers_used") or [],
+            "used_case_ids": [],
+            "generation_round": int(source.get("generation_round") or 0) + 1,
+            "parent_candidate_id": source.get("candidate_id"),
+            "change_reason": str(item.get("change_reason") or "压缩到字数预算内，事实与归属不变"),
+        })
+    out["candidates"] = items
     return out
 
 
@@ -1356,6 +1444,140 @@ def _normalize_thesis_consistency(raw: Any) -> dict[str, Any] | None:
     return out
 
 
+REVIEW_EVIDENCE_FIELDS = ("evidence_id", "field", "text", "quality", "locator")
+REVIEW_SIGNAL_FIELDS = ("signal_id", "signal_type", "value", "quality", "evidence_id")
+
+
+def _compact_review_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """把 R01 载荷裁到「评审实际会引用」的部分，不改变它读到的材料。
+
+    实测同一条视频的 R01 载荷 72,236 字符：`evidence` 68 条里只有 32 条被
+    候选、claim 或 boundary 引用，其余 36 条没进入任何结论；`risk_signals`
+    65 条每条重复 12 个键名，键名开销约占该字段一半，且 type 全是 number、
+    polarity 全是 positive、status 全相同——逐条复述这些常量不提供判据。
+
+    裁剪原则是**引用闭包**：凡是某条证据的 id 在载荷其他位置出现过，就保留它；
+    一手材料（`quality=source`，原题/简介/字幕原文）无条件保留，因为它们不是
+    「被引用才成立」而是事实底座。闭包为空时整份原样返回，避免裁成空壳。
+    """
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return payload
+    rest = {key: value for key, value in payload.items() if key != "evidence"}
+    blob = json.dumps(rest, ensure_ascii=False)
+    referenced = {
+        str(item.get("evidence_id"))
+        for item in evidence
+        if isinstance(item, dict) and str(item.get("evidence_id") or "") and str(item.get("evidence_id")) in blob
+    }
+    primary = {
+        str(item.get("evidence_id"))
+        for item in evidence
+        if isinstance(item, dict) and str(item.get("evidence_id") or "") and item.get("quality") == "source"
+    }
+    keep = referenced | primary
+    if not keep:
+        return payload
+    compacted = dict(rest)
+    compacted["evidence"] = [
+        {key: item[key] for key in REVIEW_EVIDENCE_FIELDS if key in item}
+        for item in evidence
+        if isinstance(item, dict) and str(item.get("evidence_id")) in keep
+    ]
+    signals = (payload.get("risk_signals") or {}).get("signals")
+    kept_signals = 0
+    if isinstance(signals, list):
+        slim = [
+            {key: item[key] for key in REVIEW_SIGNAL_FIELDS if key in item}
+            for item in signals
+            if isinstance(item, dict)
+        ]
+        kept_signals = len(slim)
+        risk = dict(payload.get("risk_signals") or {})
+        risk["signals"] = slim
+        risk.pop("extractor_version", None)
+        compacted["risk_signals"] = risk
+    compacted["_compaction"] = {
+        "evidence": [len(evidence), len(compacted["evidence"])],
+        "risk_signals": [len(signals) if isinstance(signals, list) else 0, kept_signals],
+        "note": "只保留被候选/claim/boundary 引用的证据与一手材料；信号保留判断所需字段",
+    }
+    return compacted
+
+
+def _review_batch_structure_error(raw: dict[str, Any], candidate_ids: list[str]) -> str | None:
+    """只检查结构与覆盖率；证据、规则和语义仍由下游裁决。"""
+    node: Any = raw
+    for key in ("ReviewResultBatch", "ReviewBatch", "review_batch"):
+        if isinstance(node, dict) and key in node:
+            node = node[key]
+    if not isinstance(node, dict):
+        return "review batch must be an object"
+    reviews = next((node[k] for k in ("reviews", "evaluations", "results", "candidates") if k in node), None)
+    if not isinstance(reviews, list):
+        return "reviews must be a list"
+    ids = []
+    for item in reviews:
+        if not isinstance(item, dict) or not isinstance(item.get("candidate_id"), str):
+            return "review and candidate_id have invalid types"
+        ids.append(item["candidate_id"])
+        takeaway = item.get("expected_takeaway", item.get("viewer_expectation"))
+        if not (isinstance(takeaway, str) and takeaway.strip()) and not (
+            isinstance(takeaway, dict) and all(isinstance(takeaway.get(k), str) for k in ("subject", "content_nature", "viewing_promise"))
+        ):
+            return "expected_takeaway missing or invalid"
+        gates = item.get("gates")
+        if not isinstance(gates, dict):
+            return "gates missing or invalid"
+        for key in GATE_IDS:
+            gate = gates.get(key)
+            if not isinstance(gate, dict) or gate.get("status") not in ("pass", "revise", "needs_review", "reject") or not isinstance(gate.get("reason"), str) or not gate["reason"].strip():
+                return f"{key} missing or invalid"
+            if any(not isinstance(gate.get(k, []), list) or any(not isinstance(x, str) for x in gate.get(k, [])) for k in ("evidence_ids", "rule_ids")):
+                return f"{key} references invalid"
+        quality = item.get("quality")
+        if quality is None and isinstance(item.get("quality_scores"), dict) and isinstance(item.get("quality_reasons"), dict):
+            quality = {k: {"score": v, "reason": item["quality_reasons"].get(k)} for k, v in item["quality_scores"].items()}
+        if not isinstance(quality, dict):
+            return "quality missing or invalid"
+        for key in QUALITY_IDS:
+            score = quality.get(key)
+            if not isinstance(score, dict) or (score.get("score") is not None and (type(score.get("score")) is not int or score["score"] not in (1, 2, 3))) or "score" not in score or not isinstance(score.get("reason"), str) or not score["reason"].strip():
+                return f"{key} missing or invalid"
+        issues = item.get("issues")
+        if not isinstance(issues, list) or any(not isinstance(x, dict) for x in issues):
+            return "issues missing or invalid"
+        for issue in issues:
+            if any(not isinstance(issue.get(k), str) or not issue[k].strip() for k in ("primary_dimension", "issue_code", "severity", "problem_span", "reason", "action")) or not isinstance(issue.get("repairable"), bool):
+                return "issue fields missing or invalid"
+            if any(not isinstance(issue.get(k, []), list) or any(not isinstance(x, str) for x in issue.get(k, [])) for k in ("evidence_ids", "rule_ids")):
+                return "issue references invalid"
+        guidance = item.get("rewrite_guidance")
+        if not isinstance(guidance, dict) or any(not isinstance(guidance.get(k), list) or any(not isinstance(x, str) for x in guidance[k]) for k in ("preserve", "modify", "forbidden")):
+            return "rewrite_guidance missing or invalid"
+        memory = item.get("memory_query")
+        if memory is None and isinstance(item.get("memory_retrieval_query"), str):
+            memory = {"problem_types": [], "query": item["memory_retrieval_query"]}
+        if not isinstance(memory, dict) or not isinstance(memory.get("problem_types"), list) or any(not isinstance(x, str) for x in memory["problem_types"]) or not isinstance(memory.get("query"), str):
+            return "memory_query missing or invalid"
+        # limit_checks：限定必答项的形态校验（条目结构合法，verdict 在枚举内）。
+        # 覆盖校验（每条 requirement 必须有答案）在 _validate_and_decide_reviews 做，
+        # 因为那里才知道每条候选挂着哪些限定。
+        checks = item.get("limit_checks", [])
+        if not isinstance(checks, list) or any(
+            not isinstance(c, dict)
+            or not isinstance(c.get("claim_id"), str)
+            or not isinstance(c.get("limit"), str)
+            or c.get("verdict") not in ("satisfied", "violated", "unclear")
+            or not isinstance(c.get("reason"), str)
+            for c in checks
+        ):
+            return "limit_checks missing or invalid"
+    if len(ids) != len(candidate_ids) or len(set(ids)) != len(ids) or set(ids) != set(candidate_ids):
+        return "reviews do not cover each requested candidate exactly once"
+    return None
+
+
 def _normalize_reviews(raw: dict[str, Any], candidate_ids: list[str]) -> list[dict[str, Any]]:
     if isinstance(raw.get("ReviewResultBatch"), dict):
         raw = raw["ReviewResultBatch"]
@@ -1367,9 +1589,10 @@ def _normalize_reviews(raw: dict[str, Any], candidate_ids: list[str]) -> list[di
     if isinstance(reviews, list):
         normalized: dict[str, dict[str, Any]] = {}
         anomalies: list[str] = []
+        non_object_count = 0
         for item in reviews:
             if not isinstance(item, dict):
-                anomalies.append("non-object review item")
+                non_object_count += 1
                 continue
             candidate_id = str(item.get("candidate_id") or "")
             if candidate_id not in candidate_ids:
@@ -1398,6 +1621,8 @@ def _normalize_reviews(raw: dict[str, Any], candidate_ids: list[str]) -> list[di
                             issue["issue_id"] = f"{candidate_id}-issue-{index}"
                         issue.setdefault("rollback_to", _default_rollback(issue))
             normalized[candidate_id] = normalized_item
+        if non_object_count:
+            anomalies.append(f"non-object review item: {non_object_count}")
         result = [normalized.get(cid, {"candidate_id": cid, "_normalization_errors": ["review missing for candidate"]}) for cid in candidate_ids]
         for item in result:
             if anomalies:
@@ -1412,7 +1637,10 @@ def _normalize_reviews(raw: dict[str, Any], candidate_ids: list[str]) -> list[di
 # 「受访」不是口头动词，但在标题里与「自述」同义：它是把后面那句话归给受访者的标记。
 # 缺了它，「黄多多首次走红毯受访：画作是自己画的」会被判成没表达归属。
 _ATTRIBUTION_MARKERS = ("据", "称", "表示", "透露", "介绍", "报道", "博主", "网友", "网传", "疑似", "回应", "驳斥", "否认", "自述", "显示", "指出", "发布", "曝",
-                        "受访", "讲述", "坦言", "回忆", "提到", "补充", "解释")
+                        "受访", "讲述", "坦言", "回忆", "提到", "补充", "解释",
+                        # 转述关系本身就是归属：「黄多多模仿妹妹：…」写明了话是谁转述的。
+                        # 只按冒号前长度判会把 7 字前缀当主题短语，误判成缺归属。
+                        "模仿", "转述", "复述")
 
 
 # 载体（视频/旁白/字幕/画面）不是信源。剧情演绎类视频里，唯一"来源"就是视频自己的叙述，
@@ -1472,6 +1700,9 @@ def _limit_is_prohibition(limit: Any) -> bool:
         text = text.replace(word, "")
     for frame in _POSITIVE_FRAME_MARKERS:
         text = text.replace(frame, "，")
+    # 「须避免混淆日期」是加强语气的禁令，不是要求标题写日期；
+    # 只消除紧邻禁令的义务词，其他独立正向要求仍必须表达。
+    text = re.sub(r"(?:必须|务必|须|应|需)\s*(?:不得|不要|不能|禁止|避免|不许|勿|严禁)", "，", text)
     return not any(marker in text for marker in _POSITIVE_LIMIT_MARKERS)
 
 
@@ -1506,14 +1737,75 @@ def _limit_attribution_scope_absent(limit: Any, headline: str) -> bool:
     return False
 
 
-def _limit_needs_body(limit: Any, prefix_labels: Any) -> bool:
-    """这条限定是否必须由标题正文表达。"""
-    if _limit_is_prohibition(limit) or _limit_covered_by_narration(limit, prefix_labels):
+def _limit_needs_body(limit: Any, prefix_labels: Any, headline: str = "") -> bool:
+    """这条限定是否必须由标题正文表达。
+
+    ``headline`` 用来判断「写作指引型限定」是否已经照做——不传时按「必须表达」处理，
+    宁可多拦也不放过，避免静默放宽。
+    """
+    if (_limit_is_prohibition(limit) or _limit_covered_by_narration(limit, prefix_labels)
+            or _conditional_duration_absent(limit, headline)):
+        return False
+    # 仅识别完整的日期区分事实，不扩展到带额外义务的复合限定。
+    # 标题没有日期时无需强加报道日期；有日期则继续按原路径并保留语义待核。
+    date_distinction = re.fullmatch(
+        r"\s*\d{1,2}月\d{1,2}日为报道日期[，,]非事件发生日期[。.]?\s*", str(limit or "")
+    )
+    date_in_headline = re.search(
+        r"\d|[〇零一二三四五六七八九十]{1,4}[年月日号]|今年|去年|前年|明年|今天|昨日|昨天|前天|明天|后天|当日|当天|近日|上周|本周|这周|下周|周[一二三四五六日天]|星期[一二三四五六日天]|上个?月|本月|这个月|下个?月", headline
+    )
+    if date_distinction and not date_in_headline:
+        return False
+    # 写作指引型限定是「标题该写什么」，标题照它写就已经满足；不能再要求正文表达限定，
+    # 否则会要求标题写出来源，而标题写的正是被建议写的那个动作。
+    if _limit_is_writing_guidance(limit, headline):
         return False
     # 归属类永远要表达：它说的就是「把话归给谁」，标题不写就等于把博主说法当成了事实。
     if _limit_is_attribution(limit):
         return True
     return not _is_retention_only_limit(limit)
+
+
+# 「不得写死用量/时长」这类数值禁令，靠标题不出现具体量值来满足。
+# 但断言词禁令（「不得写成已证实」「不得写成死亡」）同义改写仍可能违反，不能这样放开。
+_NUMERIC_LIMIT_MARKERS = ("用量", "份量", "分量", "时长", "价格", "重量", "温度", "数量", "克数", "毫升")
+_NUMERIC_IN_TITLE = re.compile(r"\d|[一二两三四五六七八九十百千万半]+\s*(?:勺|克|斤|两|毫升|分钟|小时|度|元|块|次|份)")
+
+
+def _numeric_prohibition_absent(limit: Any, headline: str) -> bool:
+    """数值类禁令 + 标题无具体量值 = 已满足，不必进待核。
+
+    只认「禁令 + 数值维度」这一种组合：标题里没有任何数字或量词，
+    就不可能写出被禁的用量、时长、价格。「不得写成已证实」这类词面禁令不在此列。
+    """
+    text = str(limit or "")
+    if not _limit_is_prohibition(text):
+        return False
+    if not any(marker in text for marker in _NUMERIC_LIMIT_MARKERS):
+        return False
+    return not _NUMERIC_IN_TITLE.search(str(headline or ""))
+
+
+# 边界的限定有两种写法：一种是「标题必须补上什么」，另一种是「标题该写什么」。
+# 后一种（「标题可写画面可见的看球动作」「宜写为转身面向电脑等可观察动作」）是给生成器的
+# 改法指引，标题照它写就已经满足；过去一律按「必须表达限定」处理，于是要求标题在正文里
+# 写出来源——而标题写的正是被建议写的那个动作，形成必死的约束。
+# 真实故障（2026-11-03 Evolink 复测）：正常新闻样本三条候选全被判 G1_MISSING_LIMIT，
+# 人工判定三条全部可用。
+_GUIDANCE_MARKERS = ("标题可写", "可写", "宜写", "应写", "建议写", "写成", "写为", "改为")
+_QUOTED_SPAN = re.compile(r"[“\"「]([^”\"」]{1,30})[”\"」]")
+
+
+def _limit_is_writing_guidance(limit: Any, headline: str) -> bool:
+    """限定是在给标题改法，且标题没有落在它否定的那个子事实上。"""
+    text = str(limit or "")
+    if not any(marker in text for marker in _GUIDANCE_MARKERS):
+        return False
+    if not headline:
+        return False
+    # 引号里是被否定的子事实；标题若写了它，说明没照做，仍按必须表达处理。
+    rejected_spans = [m.group(1) for m in _QUOTED_SPAN.finditer(text)]
+    return bool(rejected_spans) and not any(span and span in headline for span in rejected_spans)
 
 
 # 「须保留 X」「限定为 X」「须以 X 为准」要求的是「别改写、别夸大」——标题照材料原样
@@ -1541,6 +1833,219 @@ _LIMIT_UNCERTAINTY_MARKERS = (
     "部分", "个别", "有观点认为", "一种说法", "存在争议", "未证实", "未获证实",
 )
 _LIMIT_ANCHOR_FILLER = ("须保留", "须保持", "保留为", "限定为", "须以", "为准", "不得", "必须", "须", "应")
+
+
+_LIMIT_RETAIN_HINTS = ("须保留", "需保留", "应保留", "保留为", "保留", "须保持", "须延续", "须沿用")
+
+
+def _conditional_duration_absent(limit: Any, headline: str) -> bool:
+    """仅豁免明确以「标题写时长」为条件且标题未表达时长的约束。"""
+    text = str(limit or "")
+    conditional = re.search(r"(?:标题若写|若标题写|标题(?:如|如果)写|(?:如|如果)标题写)(?:具体)?(?:步骤)?时长", text)
+    if not conditional:
+        conditional = re.search(r"标题若写(?=须|需|应|必须)", text)
+        if not conditional or not re.search(r"(?:步骤)?时长", text[:conditional.start()]):
+            return False
+    # 不将独立的必须披露义务一并豁免。
+    before = text[:conditional.start()]
+    if re.search(r"(?:必须|须|应|需要|需)(?:写明|注明|标明|说明|保留|表达)", before):
+        return False
+    if re.search(r"[；;，,](?:另|并|同时|还)(?:必须|须|应|需要|需)(?:写明|注明|标明|说明|保留|表达)|[；;](?:必须|须|应|需要|需)(?:写明|注明|标明|说明|保留|表达)", text[conditional.end():]):
+        return False
+    duration = re.search(
+        r"(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百半几数来多]+)\s*(?:秒|分钟|分(?!钟)|小时|天|日|周|星期|个月|月|年)"
+        r"|时长|耗时|用时|多久|顷刻|瞬间|转眼|片刻|一会儿|一会|很快|快速|慢炖|久煮|煮至", headline
+    )
+    return not bool(duration)
+
+
+_CONDITIONAL_MARKERS = re.compile(r"(?:若|如果|如)(?:标题|片中|视频)?(?:写|写到|涉及|沿用|出现|提到)|标题(?:写|写到|涉及|沿用|出现|提到)时")
+_QUOTED_SPAN_ANY = re.compile(r"[“\"「『]([^”\"」』]{2,30})[”\"」』]")
+# 条件已成立时可用来证明「要求已照做」的锚点；只收具体限定词，不收泛化虚词。
+_CONDITIONAL_ANCHORS = ("此次", "当天", "当日", "当年", "去年", "今年", "早年", "事后", "近期",
+                        "目前", "还需进一步核实", "仍需核实", "快讯", "报道称", "原文称", "博主称",
+                        "博主认为", "博主提醒", "谭乔", "交警部门表示")
+_ATTRIBUTION_VERBS = ("发帖称", "发帖表示", "发帖预测", "自述", "坦言", "回忆", "讲述", "指出", "提醒",
+                      "说明", "透露", "回应", "解释", "证实", "确认", "澄清", "承认", "报道", "发布",
+                      "显示", "认为", "表示", "称", "说")
+_FUNCTION_CHARS = set("的了和与及或是在为其之这那就也都而并且如若时写标题涉及沿用出现提到须应与保留同现不得成")
+
+
+def _content_bigrams(text: str) -> set[str]:
+    """两字滑窗：用来判断引号里的触发条件是否真的出现在标题里。
+
+    只用两字组而不做分词，是因为这里要回答「能不能证明条件没被触发」。
+    证据不够时应当保持待核，所以只要有任何内容两字组重合，就算条件可能成立。
+    """
+    clean = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(text or ""))
+    grams = {clean[i:i + 2] for i in range(len(clean) - 1)}
+    return {g for g in grams if not all(ch in _FUNCTION_CHARS for ch in g)}
+
+
+def _conditional_trigger_absent(limit: Any, headline: str) -> bool:
+    """能证明「标题没写这个触发条件」时才判不适用。
+
+    只对「若标题写『X』…」这类引号条件生效：引号里的 X 与标题没有任何内容重合，
+    才说明这条约束的前提不成立。条件本身没有引号（「若标题涉及具体处置情况」）
+    无法字面证伪，一律保持待核——那类正是最不能机械放行的。
+    """
+    text = str(limit or "")
+    if not _CONDITIONAL_MARKERS.search(text):
+        return False
+    clause = re.split(r"[，,；;]", text, maxsplit=1)[0]
+    quoted = [q for q in _QUOTED_SPAN_ANY.findall(clause) if q]
+    if not quoted:
+        return False
+    title_grams = _content_bigrams(headline)
+    for trigger in quoted:
+        if trigger in headline or (_content_bigrams(trigger) & title_grams):
+            return False
+    return True
+
+
+_LIMIT_NAME_SUFFIXES = ("本人", "个人", "主观", "的", "所说", "自述", "观点", "态度", "表态", "评价", "说法",
+                        "叙述", "口播", "描述")
+
+
+def _limit_source_names(text: str) -> list[str]:
+    """从「归属为萨戈夫本人的表态」「如「博主称」」里抽出应该出现在标题里的信源名。"""
+    names: list[str] = []
+    match = re.search(r"归属(?:为|于)?\s*([^\s，,；;。「」“”]{2,18})", str(text or ""))
+    if match:
+        raw = match.group(1)
+        for suffix in _LIMIT_NAME_SUFFIXES:
+            raw = raw.split(suffix)[0]
+        if 2 <= len(raw) <= 8:
+            names.append(raw)
+    for quoted in _QUOTED_SPAN_ANY.findall(str(text or "")):
+        base = quoted.strip()
+        for verb in _ATTRIBUTION_VERBS:
+            if base.endswith(verb) and len(base) > len(verb):
+                base = base[: -len(verb)]
+                break
+        base = base.replace("/", "").strip()
+        if 2 <= len(base) <= 8:
+            names.append(base)
+    return list(dict.fromkeys(names))
+
+
+def _conditional_satisfied(limit: Any, headline: str) -> bool:
+    """条件成立时，能不能字面证明标题已按约束写。
+
+    只认三种可核对证据：引号要求原样出现、具体限定锚点出现、冒号式归属。
+    都证明不了就返回 False，由调用方保留待核。
+    """
+    text = str(limit or "")
+    if any(q and q in headline for q in _QUOTED_SPAN_ANY.findall(text)):
+        return True
+    if any(anchor in text and anchor in headline for anchor in _CONDITIONAL_ANCHORS):
+        return True
+    if "归属" in text:
+        verbs = "|".join(_ATTRIBUTION_VERBS)
+        for name in _limit_source_names(text):
+            if re.search(rf"{re.escape(name)}[^，,。；;：:与和及]{{0,6}}(?:{verbs}|[:：])", headline):
+                return True
+    return False
+
+
+def _prohibition_hit(limit: Any, headline: str) -> str | None:
+    """禁令类限定唯一可判定的形态：被禁词被引号括出、且字面出现在标题里。
+
+    「不得写成"已证实"」+ 标题「事件已证实」→ 命中「已证实」，这是词法真正测得出的违反。
+    引号里没写被禁词（如「不得推断中毒」）、或标题改写了同义词——测不出，交评审，
+    不连坐。返回命中的词，未命中返回 None。
+    """
+    text = str(limit or "")
+    if not _limit_is_prohibition(text):
+        return None
+    for quoted in _QUOTED_SPAN_ANY.findall(text):
+        if quoted and quoted in headline:
+            return quoted
+    return None
+
+
+def _limit_satisfied_by_literal(limit: Any, headline: str) -> bool:
+    """保留类/归属类限定能不能字面证明已照做。
+
+    只处理两种低风险形态：「须保留『X』」且 X 原样在标题里；「须保留 X 归属」且主体在标题里。
+    其余（含禁令、含推断要求的复合限定）一律返回 False，继续保持待核。
+    """
+    text = str(limit or "")
+    quoted = [q for q in _QUOTED_SPAN_ANY.findall(text) if q]
+    if _is_retention_only_limit(text) and quoted:
+        # 「须保留 X」是「写了别写错」：标题完全没写 X 时保留义务不成立。
+        # 但 X 已经出现在标题里时仍需人看——同一条限定可能还带着别的约束。
+        return not any(q in headline for q in quoted)
+    if _limit_is_attribution(text):
+        verbs = "|".join(_ATTRIBUTION_VERBS)
+        for name in _limit_source_names(text) or [_subject_of(text)]:
+            if name and re.search(rf"{re.escape(name)}[^，,。；;：:与和及]{{0,6}}(?:{verbs}|[:：])", headline):
+                return True
+    return False
+
+
+def _limit_key(item: Any) -> tuple[str, str]:
+    """限定的身份：同一条 claim 下的同一条限定文本。"""
+    if not isinstance(item, dict):
+        return ("", "")
+    return (str(item.get("claim_id") or ""), str(item.get("limit") or ""))
+
+
+def _limit_check_coverage_errors(review: Any, mechanical: Any) -> list[str]:
+    """机械层登记的每条限定都必须有评审判定，缺一条就是「没答」。
+
+    与 schema 校验不同，这里知道每条候选挂着哪些 requirement（在 mechanical 里），
+    所以覆盖校验只能放这一层。输出是 validation_error 文案，直接进已有的单条重问通道。
+    """
+    requirements = [r for r in ((mechanical or {}).get("limit_requirements") or []) if isinstance(r, dict)]
+    if not requirements:
+        return []
+    answered = _limit_check_verdicts(review)
+    gaps = [r for r in requirements if _limit_key(r) not in answered]
+    return [f"limit_checks 未覆盖全部限定（缺 {len(gaps)}/{len(requirements)} 条，如「{str(gaps[0].get('limit'))[:40]}」）须逐条给出 satisfied/violated/unclear"] if gaps else []
+
+
+def _limit_check_verdicts(review: Any) -> dict[tuple[str, str], str]:
+    """评审对每条限定的判定；只认三个枚举值，其余视为没答。"""
+    verdicts: dict[tuple[str, str], str] = {}
+    for item in ((review or {}).get("limit_checks") or []) if isinstance(review, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        verdict = str(item.get("verdict") or "")
+        if verdict in {"satisfied", "violated", "unclear"}:
+            verdicts[_limit_key(item)] = verdict
+    return verdicts
+
+
+def _limit_pending_reason(limit: Any, headline: str) -> str:
+    """待核原因要能分组：评审台按原因批量处理，比逐条重读快得多。
+
+    先按限定性质分类，再看落点。反过来的话，「不得写成确定动作名」会显示成
+    「标题未出现落点：确定动作名」——要求是「别写」，不是「写上」，那是误导。
+    """
+    text = str(limit or "")
+    if _limit_is_attribution(text):
+        return "归属类限定：需确认标题是否归给了对的人"
+    if _limit_is_prohibition(text):
+        return "禁止类限定：需确认标题没有写出被禁内容"
+    anchors = _limit_anchors(text)
+    if anchors:
+        missing = [a for a in anchors if a not in headline]
+        if missing:
+            return f"标题未出现限定要求的落点：{'、'.join(missing[:3])}"
+    return "限定没有任何可核对落点：需人工判断是否适用"
+
+
+def _limit_quoted_in_headline(limit: Any, headline: str) -> bool:
+    """限定里引号包的原文是否真的出现在标题里。
+
+    这是可核对的：原文逐字在标题里出现，就不是「语义判不了」，没必要再进待核队列。
+    """
+    for quoted in re.findall(r"[\"“「『']([^\"”」』']{2,20})[\"”」』']", str(limit or "")):
+        text = quoted.strip()
+        if text and text in headline:
+            return True
+    return False
 
 
 def _limit_anchors(limit: Any) -> list[str]:
@@ -1584,6 +2089,16 @@ def _limit_is_expressed(limit: Any, headline: str) -> bool:
     锚点也抽不出来时放行——机械判不了的事交给评审，但不能因此放过已知类别。
     """
     text = str(limit or "")
+    # 引号里是被限制的那段原文（ASR 原词、「约三分钟」）。两种情况：
+    #  - 原文已经进了标题：限定落实了，放行（「约三分钟」写全了就不该判缺）；
+    #  - 原文没进标题：要求「标注/写明」的没有标注义务，要求「不得写」的也没违约；
+    #    只有「须保留 X」还要求标题必须留住这段原文，没留住才算缺。
+    # 真实误杀：「ASR『攻艦步』须标注为转写推断」判否了标题根本没提这个动作的候选。
+    quoted = [q.strip() for q in re.findall(r"[\"“「『']([^\"”」』']{2,20})[\"”」』']", text) if q.strip()]
+    if quoted:
+        if any(q in headline for q in quoted):
+            return True
+        return not any(hint in text for hint in _LIMIT_RETAIN_HINTS)
     for name, triggers, markers in _LIMIT_CATEGORY_RULES:
         if not any(trigger in text for trigger in triggers):
             continue
@@ -1647,9 +2162,90 @@ def _strip_attribution_false_friends(text: str) -> str:
     return text
 
 
-def _has_explicit_source_relation(headline: str) -> bool:
-    """Reject generic source labels such as '通报：' without a relation word."""
+# 冒号式归属：标题最省字、最常用的写法是「主体：内容」——「萨戈夫：德文是传奇」
+# 「作者：财经媒体误导性强」。裸 token 表认不出这种结构，却有反例：错误标题
+# 「赢过德文一次，萨戈夫为何仍称他传奇」因为句中有个「称」被判「已归属」。结果是
+# 写对的被判缺归属、写错的被判已归属（2026-11-03 复测 8 条误拦的根因，人工全判可用）。
+_COLON_SOURCE = re.compile(r"([^：:，,。！？!?]{1,12})[：:]")
+# 「须归属为博主自述，不得写成系统确认的普遍适用结论」里的主体是「博主自述」。
+_ATTRIBUTION_SUBJECT = re.compile(r"归属(?:为|于)?\s*([^，,；;。]{1,12})")
+# 冒号前必须是「谁在说」，不能是「发生了什么」：「黄多多首次走红毯：紧张到出来才好」的
+# 前半句是事件，读者从中得不到信源；把它当主体会把真缺归属的标题放过去（既有测试锁住了
+# 这一行为）。出现谓词/事件标记就回落 token 判定，宁可继续要求归属也不误放。
+_SUBJECT_DISQUALIFIERS = ("首次", "走", "到", "被", "在", "了", "将", "正", "已", "发生", "现身",
+                          "亮相", "出席", "参加", "获得", "夺", "击败", "赢", "输", "开", "拍",
+                          "做", "吃", "买", "卖", "称", "表示", "回应", "发帖")
+# 泛称不是信源：读者看完不知道是谁说的，仍算缺归属。「通报：」由上面的分支单独处理。
+_GENERIC_SOURCE_LABELS = ("通报", "有消息", "据了解", "据称", "据悉", "消息", "相关", "有关",
+                          "知情人士", "内部人士", "外界", "舆论", "网传")
+# 把「萨戈夫称」「博主自述」「作者认为」还原成主体本身，用来核对标题归给了谁。
+_SOURCE_PHRASE_TAILS = ("发帖称", "发帖表示", "发帖预测", "受访", "自述", "坦言", "回忆", "讲述", "指出", "提醒",
+                        "说明", "透露", "回应", "解释", "报道", "发布", "显示", "认为", "表示", "证实",
+                        "确认", "澄清", "承认", "预测", "称")
+
+
+def _subject_of(phrase: Any) -> str:
+    """从「萨戈夫称」「博主自述」「须归属为博主自述，不得…」里抽出要求归给的主体。
+
+    抽不出主体就返回空串，由调用方跳过——把整句限定当成主体名会凭空多出一条必死约束。
+    """
+    text = str(phrase or "").strip()
+    match = _ATTRIBUTION_SUBJECT.search(text)
+    if match:
+        text = match.group(1).strip()
+    elif len(text) > 12 or "，" in text or "," in text:
+        return ""
+    for tail in _SOURCE_PHRASE_TAILS:
+        if text.endswith(tail) and len(text) > len(tail):
+            text = text[: -len(tail)].strip()
+            break
+    return text if len(text) <= 12 else ""
+
+
+def _attribution_subject_present(headline: str, phrases: Any) -> bool:
+    """边界要求归给谁，标题就得出现谁。
+
+    抽不出主体（如只有「须归属」这类泛化要求）时不额外拦截，交给上层判定，
+    避免把没有具体归属对象的限定变成一条必死约束。
+    """
+    for phrase in phrases or []:
+        alternatives = [part.strip() for part in re.split(r"[/／]", str(phrase or "")) if part.strip()]
+        def matches(part: str) -> bool:
+            # 只认能解析的具体主体；归属动词必须与该主体同一短语，不能借用别人的「称」。
+            part = re.split(r"[，,；;]", part, maxsplit=1)[0].strip()
+            if part in {"报道称", "据报道", "媒体报道", "媒体称"}:
+                return part in headline
+            subject = _subject_of(part)
+            if not subject:
+                return False
+            escaped = re.escape(subject.removeprefix("据"))
+            # 主体与归属动词之间只允许不含标点、不含并列连词的短状语（「萨戈夫赛后称」「博主回应称」）。
+            # 不允许跨句借用别的信源的归属动词：「警方抓人，网友称…」里的「称」属于网友。
+            verbs = "|".join(_ATTRIBUTION_VERBS)
+            return bool(re.search(
+                rf"(?:据)?{escaped}[^，,。；;：:与和及]{{0,4}}(?:{verbs}|[:：])", headline))
+        if alternatives and not any(matches(part) for part in alternatives):
+            return False
+    return True
+
+
+def _has_explicit_source_relation(headline: str, required_phrases: Any = None) -> bool:
+    """标题是否把话归给了该归的人。
+
+    ``required_phrases`` 是边界给出的具体归属要求（「萨戈夫称」「博主自述」）。给了就必须
+    归给那个主体——只看「有没有任何归属表达」是不够的：「女生居家一周四练day1：哑铃练背」
+    有冒号却没有博主，而它要的正是博主自述（既有测试锁住了这一条）。
+    """
     text = _strip_attribution_false_friends(str(headline).strip())
+    if required_phrases is not None:
+        if not _attribution_subject_present(text, required_phrases):
+            return False
+        # 具体归属要求已经带着主体与归属动词（或冒号）核对过，本身就是归属证据：
+        # 「谭乔证实…」不需要再额外出现「据/称/表示」这些泛化标记。
+        if any(_subject_of(part) or part in {"报道称", "据报道", "媒体报道", "媒体称"}
+               for phrase in required_phrases
+               for part in re.split(r"[/／]", str(phrase or ""))):
+            return True
     if text.startswith(("通报：", "通报:", "通报称")):
         return False
     if "通报：" in text or "通报:" in text:
@@ -1657,6 +2253,18 @@ def _has_explicit_source_relation(headline: str) -> bool:
         return any(word in prefix for word in ("据", "称", "显示", "指出", "发布"))
     if "通报" in text:
         return any(word in text for word in ("据", "称", "显示", "指出", "发布"))
+    # 冒号前是具体主体（专名、作者、博主、机构）即完成归属；泛称与载体（视频/画面/字幕）
+    # 不算信源，落入下面的 token 判定继续要求明确归属表达。
+    colon = _COLON_SOURCE.search(text)
+    if colon:
+        prefix = colon.group(1).strip()
+        event_like = any(word in prefix for word in _SUBJECT_DISQUALIFIERS)
+        generic = any(word in prefix for word in _GENERIC_SOURCE_LABELS + _CARRIER_SOURCE_TOKENS)
+        # 主体要短：人名 2-4 字、带「赛后/现场」的 5-6 字；「女生居家一周四练day1」这种
+        # 主题短语不是信源，放了它等于让真缺归属的标题过关（既有测试锁住了这一条）。
+        named = any(word in prefix for word in _REAL_SOURCE_TOKENS) or len(prefix) <= 6
+        if prefix and not event_like and not generic and named:
+            return True
     # 其它信源同样要有明确归属表达，不能因不含「通报」就默认已归属。
     return any(word in text for word in _ATTRIBUTION_MARKERS)
 
@@ -1679,15 +2287,47 @@ def _default_rollback(issue: dict[str, Any]) -> str:
 
 # 载体元话语：标题把「视频/画面/标题/封面」当主语或信源（"视频称""画面却是""标题说""据视频所述"），
 # 这是审核/开发视角，不是用户视角。
+def _attribution_identity_present(headline: str, required_phrases: Any) -> bool:
+    """程序旗标兜底：主体词/身份称谓/性质前缀出现即算归属已表达，不要求转述动词。
+
+    _has_explicit_source_relation 要「主体+称/：」的转述形式，实测把
+    「商业观察：博主拆解小包装…」也判缺（2026-11-04 v2，小包装 9/9 候选被
+    programmatic_g1_flags 强判 revise，压过评审模型的 pass，而人工对这些标题判可用）。
+    人评口径是「读者会不会把它当官方信息」：主体已出现、或标题自带内容性质框架，
+    读者就知道这是谁的观察。纯断言标题（没有任何身份词/性质词）仍然返回 False，旗标照打。
+    """
+    text = str(headline or "")
+    for phrase in (required_phrases or []):
+        for part in re.split(r"[/／]", str(phrase or "")):
+            subject = _subject_of(part) or part
+            if subject and (subject in text or subject.lstrip("据") in text):
+                return True
+    return bool(_ATTRIBUTION_IDENTITY_RE.search(text))
+
+
 _META_PHRASE_RE = re.compile(
     # 冒号式（「旁白：」「字幕：」）和「旁白讲」同样是载体元话语，早先只匹配「旁白称」这类带动词的说法，
     # 于是「旁白：狙击手装焦尸」既逃过元话语拦截、又被 G1 判成"没表达归属"，两头都错。
-    r"(?:视频|画面|标题|封面|片子|原题|字幕|口播|旁白|文案)(?:里|中)?(?:称|说|讲|提到|显示|写着|只见|却是|透露|表示|[:：])"
+    # 「标/标注/注」是 V 集人工评审暴露的新写法：「博主路侧拍环广西赛段 字幕标车手秒差」
+    # ——把字幕当信息源报数据，人工 2 条同理由拒绝，旧词表只认「字幕称/字幕：」漏拦。
+    r"(?:视频|画面|标题|封面|片子|原题|字幕|口播|旁白|文案)(?:里|中)?(?:称|说|讲|提到|显示|写着|只见|却是|透露|表示|标注?|[:：])"
     r"|据(?:视频|画面|标题|封面|原题|字幕|片子|旁白|口播)"
     r"|作者称"
 )
+# 制作者动作：把博主的剪辑/制作行为或制作者身份写进标题（V 集人工 rejected 2 条的
+# 语义规则：博主是制作者不是场面见证人）。注意与合格写法的边界——
+# 「博主：X合集」（approved）是归属前缀 + 内容宾语，不在此列；
+# 「博主把X剪成合集」「博主合集：X」（rejected）把制作动作/身份摆进了正文。
+_CREATOR_ACTION_RE = re.compile(r"博主.{0,12}?(?:剪成|剪出|剪了|剪辑成?|把.{0,16}剪)|^博主(?:合集|剪辑)[:：]?")
 # 校验结论：标题写「与…不符/不一致」是评审层的话，不该出现在成品标题。
 _VERIFICATION_CONCLUSION_RE = re.compile(r"与[^，。！？]{0,12}(?:不符|不一致)")
+# 归属线索词：出现任一即视为标题已给出「这是谁的观察/演示」的信号。
+# 小包装实测（2026-11-04 v2）：标题写「商业观察：博主拆解…」评审仍 9/9 报
+# G1_SOURCE_ATTRIBUTION_MISSING——模型把 required_source_phrase 当字面关键词，
+# 没写「博主称」就不认。程序先做字面预判，把结论交给评审当事实输入。
+_ATTRIBUTION_IDENTITY_RE = re.compile(
+    r"博主|UP主|Up主|up主|主理人|作者|本人|商业观察|新闻评论|消费观察|行业观察|观察|解读|测评|实测|演示|教学|教程|拆解|体验|探店|自述|亲测|分享"
+)
 
 
 def _title_grams(text: str) -> set[str]:
@@ -1754,19 +2394,18 @@ def _enforce_single_mainline(contract: dict[str, Any], understanding: Understand
         if span is None:
             continue
         spans.append((uid, span[0], span[1], str(unit.kind or "")))
-    if len(spans) == 1 and len(core_ids) > len(spans):
-        # 只有一个核心单元能定位到 ASR，其余连时间都定不了：它们不能和有证据的主线并列当核心。
-        timed = {item[0] for item in spans}
-        untimed = [uid for uid in core_ids if uid not in timed]
-        demoted = [{"unit_id": uid, "start": None, "end": None,
-                    "kind": str((units.get(uid).kind if units.get(uid) else "") or ""),
-                    "reason": "无时间证据，不能与有证据的主线并列为核心"} for uid in untimed]
-        contract["core_unit_ids"] = [uid for uid in core_ids if uid in timed]
-        contract["demoted_core_units"] = demoted
-        return demoted
+    # 缺少 ASR 时间不能证明单元不是核心；可能来自画面、OCR 或其他一手材料。
+    if len(spans) != len(core_ids):
+        return []
     if len(spans) < 2:
         return []
+    # 时间间距只能辅助识别互不相干的叙事，不能证明教程的步骤和评价是不同主线。
+    # 模型标为核心的观点、评价等保留在契约中，是否兑现标题承诺交给 G3 审核。
+    if any(item[3] not in {"叙事", "narrative"} for item in spans):
+        return []
     earliest = min(spans, key=lambda item: item[1])
+    if any(item[0] != earliest[0] and item[1] <= earliest[2] for item in spans):
+        return []
     far = [item for item in spans if item[1] - earliest[1] >= 8.0]
     if not far:
         return []
@@ -1780,8 +2419,48 @@ def _enforce_single_mainline(contract: dict[str, Any], understanding: Understand
     return demoted
 
 
+def _core_hook_is_aligned(candidate: dict[str, Any], highlights: list[Any], contract: dict[str, Any]) -> bool:
+    """主看点或被主旨契约明确保留的核心看点；其余交由正常拦截。"""
+    def field(item: Any, name: str) -> Any:
+        return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+
+    main = next((h for h in highlights if field(h, "role") == "main"), None)
+    if not main or candidate.get("highlight_id") == field(main, "highlight_id"):
+        return True
+    selected = next((h for h in highlights if field(h, "highlight_id") == candidate.get("highlight_id")), None)
+    return bool(selected and field(selected, "relation") == "core"
+                and field(selected, "unit_id") in (contract.get("core_unit_ids") or [])
+                and field(selected, "thesis_id") == contract.get("thesis_id")
+                and contract.get("thesis_id"))
+
+
+def _unit_id_of(item: Any) -> str:
+    """取单元 id：理解域单元与抽帧脚本产出的是对象，存档状态里是 dict，两种都要能读。"""
+    if isinstance(item, dict):
+        return str(item.get("unit_id") or "")
+    return str(getattr(item, "unit_id", "") or "")
+
+
+def _allowed_unit_ids(understanding: Any, boundary: Any, highlights: Any) -> set[str]:
+    """本任务可引用的单元集合：语义单元 + 结构片段 + 边界表态过的单元，再减去明确排除的。
+
+    真实故障（2026-11-03 Evolink 复测）：结构候选绑定的单元名是 turn-2 / axis-1，语义单元
+    却叫 su-N，而允许集合只收 semantic_units，于是所有绑结构片段的候选一律被判
+    G4_INVALID_REFERENCE「unit_id 不在当前任务范围」——它们指向的恰恰是主看点。同一批里
+    「两员工偷看球赛」三条候选、共 4 条被判否，人工全部判可用。
+    初评与重评此前各写一套集合构造，分叉又放大了这个问题；这里统一成一个来源。
+    """
+    units = {_unit_id_of(u) for u in (getattr(understanding, "semantic_units", None) or [])}
+    units |= {_unit_id_of(h) for h in (highlights or [])}
+    decisions = getattr(boundary, "unit_decisions", None) or []
+    units |= {_unit_id_of(d) for d in decisions}
+    excluded = {_unit_id_of(d) for d in decisions if str(getattr(d, "decision", "")) == "excluded"}
+    return {uid for uid in units if uid} - excluded
+
+
 def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], allowed_highlights: set[str], evidence_ids: set[str], max_chars: int, allowed_units: set[str] | None = None, required_prefixes: list[str] | None = None, claim_decisions: list[Any] | None = None) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     errors.extend({"code": "G4_SCHEMA_INVALID", "repairable": True, "reason": error} for error in candidate.get("generation_schema_errors", []))
     required = list(required_prefixes or [])
     prefix_labels = [str(x) for x in (candidate.get("prefix_labels") or [])]
@@ -1796,15 +2475,29 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
         errors.append({"code": "G4_LENGTH_EXCEEDED", "repairable": True, "reason": f"渲染后总长 {len(rendered)} 超过 {max_chars}（前缀 {prefix_len} 字 + 正文 {len(head_body)} 字）"})
     if head_body.rstrip().endswith(("?", "？")):
         errors.append({"code": "G4_ENDING_QUESTION_MARK", "repairable": True, "reason": "标题不能以问号结尾"})
+    # 前缀在生成侧就被 normalize_prefix_labels 无条件并进候选，渲染时又由 render_labels
+    # 写进标题，所以「缺前缀」在这一层不可达：全库 23 个必填前缀任务、91 条候选、0 次命中。
+    # 它只在有人绕过归一化手搓状态时才有意义，因此降级为 warning：留观测，不阻断交付。
     missing_prefixes = [label for label in required if label not in prefix_labels]
     if missing_prefixes:
-        errors.append({"code": "G4_PREFIX_MISSING", "repairable": False, "reason": f"缺少平台标注前缀：{'、'.join(missing_prefixes)}"})
+        warnings.append({"code": "G4_PREFIX_MISSING", "reason": f"候选未携带必填前缀：{'、'.join(missing_prefixes)}（正常路径不可达，出现即说明有人绕过了前缀归一化）"})
     if body_budget(max_chars, required) < MIN_BODY_BUDGET:
         errors.append({"code": "G4_PREFIX_BUDGET_EXHAUSTED", "repairable": False, "reason": f"前缀占用 {len(render_labels(required))} 字，正文预算不足，需要业务决策而非改标题"})
     if not candidate.get("candidate_id") or not candidate.get("claim_ids") or not candidate.get("evidence_ids"):
         errors.append({"code": "G4_REQUIRED_FIELD_MISSING", "repairable": True, "reason": "candidate_id、claim_ids 或 evidence_ids 缺失"})
-    if candidate.get("highlight_id") not in allowed_highlights or any(x not in allowed_claims for x in candidate.get("claim_ids", [])):
-        errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": "claim_id 或 highlight_id 不在当前任务范围"})
+    cited_claims = [str(x) for x in (candidate.get("claim_ids") or [])]
+    known_claims = {str(getattr(d, "claim_id", "")) for d in (claim_decisions or [])}
+    # 拆开两种「引用不合法」：id 在任务里根本不存在（生成器幻觉）→ 真错误，拦；
+    # id 存在但被边界判了暂缓核验/已排除 → 不是引用错误，是内容约束。V 集人工评审
+    # 7 条 INVALID_REFERENCE 全部引用真实存在的暂缓核验 claim，人工 5/6 判可用：
+    # 「绑了哪条 claim」是元数据，标题文本有没有把该说法写成断言才是语义问题，
+    # 交评审判（机械只登记，评审输入里有 blocked_claims 清单）。
+    hallucinated = [x for x in cited_claims if x not in allowed_claims and x not in known_claims]
+    blocked_refs = [x for x in cited_claims if x not in allowed_claims and x in known_claims]
+    if candidate.get("highlight_id") not in allowed_highlights or hallucinated:
+        errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": f"claim_id 或 highlight_id 不在当前任务范围：{hallucinated or [candidate.get('highlight_id')]}"})
+    if blocked_refs:
+        warnings.append({"code": "G4_BLOCKED_CLAIM_REF", "reason": f"候选绑定了暂缓核验/已排除的陈述（{'、'.join(blocked_refs)}）；标题是否把这些说法写成断言由评审判断", "blocked_claim_ids": blocked_refs})
     unit_id = candidate.get("unit_id")
     if unit_id and allowed_units is not None and unit_id not in allowed_units:
         errors.append({"code": "G4_INVALID_REFERENCE", "repairable": True, "reason": "unit_id 不在当前任务范围"})
@@ -1815,6 +2508,13 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     meta_hit = _META_PHRASE_RE.search(head_body)
     if meta_hit:
         errors.append({"code": "G4_META_PHRASE", "repairable": True, "reason": f"标题含元信息表述「{meta_hit.group(0)}」，应直接陈述视频内容而非描述视频/画面怎么说"})
+    # 制作者动作：博主是视频的制作者，不是场面的当事人或见证人。V 集人工
+    # rejected 2 条同理由（「博主把钓鱼圈稀奇古怪片段剪成合集」「博主合集：钓鱼圈
+    # 那些稀奇古怪场面」），而「博主：钓鱼圈稀奇古怪片段合集」判 approved——
+    # 区别在「剪成/合集：」把制作动作或制作者身份摆进了标题。
+    creator_hit = _CREATOR_ACTION_RE.search(head_body)
+    if creator_hit:
+        errors.append({"code": "G4_CREATOR_PERSPECTIVE", "repairable": True, "reason": f"标题把博主的制作者身份/剪辑动作写进正文「{creator_hit.group(0)}」；博主是视频制作者不是场面见证人，应直接陈述内容（如「博主：X合集」）"})
     # 校验结论：标题不能写「与…不符/不一致」这类审核判断
     verify_hit = _VERIFICATION_CONCLUSION_RE.search(head_body)
     if verify_hit:
@@ -1832,12 +2532,52 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
         policy_hits.append({"rule_id": "P9", "code": "G2_POLICY_VIOLATION", "terms": attacks,
                             "repairable": True, "reason": attack_rewrite_hint(attacks)})
     # 数字与引用证据的语义对齐在独立信号校验中执行；原题不是数值白名单。
-    # 来源前缀完整性：「据X」后须跟归属动词（报道/称/表示…），不能悬空成「据咪咕体育」
-    attr = re.match(r"^据([\u4e00-\u9fff]{2,6})(?=\s|[，,])", head_body)
-    if attr and not re.search(r"报道|称|表示|显示|透露|介绍|消息|通报|所述|说|力争", attr.group(1)):
-        errors.append({"code": "G4_INCOMPLETE_ATTRIBUTION", "repairable": True, "reason": f"来源前缀「据{attr.group(1)}」缺少归属动词（报道/称/表示），应补全"})
+    # 归属写法有多种：「据X报道，…」「X称，…」「X通报，…」都成立，不能只认一种。
+    # 逗号/冒号停顿的「据通报：」「据现代快报，」人工判过可用（gold.csv 2026-10-31）；
+    # 「据X +空格」是人评明确判过「语法结构不完整」的格式（gold.csv：
+    # 据咪咕体育 费兰补时破门→勉强通过、据咪咕体育 费兰托雷斯补时进球瞬间→不可用），
+    # 空格版必须报错。「据爆料红米…」这种无停顿连写机械判不了，交给评审 Q1_UNCLEAR。
+    dangling = re.match(r"^据\s*(?:[，,。；;]|$)", head_body)
+    if dangling:
+        errors.append({"code": "G4_INCOMPLETE_ATTRIBUTION", "repairable": True, "reason": "「据」后没有信源，需补全可识别的发布方或信源名"})
+    spaced = re.match(r"^据\s*[\u4e00-\u9fffA-Za-z0-9]{2,8}\s", head_body)
+    if spaced:
+        errors.append({"code": "G4_INCOMPLETE_ATTRIBUTION", "repairable": True, "reason": "「据X」后接空格不完整，应写「X：」「据X报道，」或「据X，」"})
+    # 词法命中不能证明限定与标题语义一致；保留不确定项供裁决路由使用。
+    limit_pending = []
+    for d in claim_decisions or []:
+        if str(getattr(d, 'claim_id', '')) not in {str(x) for x in (candidate.get('claim_ids') or [])}:
+            continue
+        for limit in (getattr(d, 'required_limits', None) or []) if str(getattr(d, 'decision', '')) == 'limited' else []:
+            # 引号可能是禁写内容、信源或附加条件；字面命中或缺失都不能证明
+            # 限定整体满足（同义改写也可能违反禁止项），统一留待人工核实。
+            # 但「字面已照做」的保留/归属类不构成待核，否则每条保留口径都变成必查项。
+            if _limit_satisfied_by_literal(limit, head_body):
+                continue
+            # 数值类禁令（「不得写死用量/时长」）靠标题不出现具体量值来满足：
+            # 标题里一个数字都没有，就不可能违反。人工判可用的案例里 23 条
+            # G1_MISSING_LIMIT 有相当一部分是这类被误挂成待核。
+            if _numeric_prohibition_absent(limit, head_body):
+                continue
+            if not _conditional_duration_absent(limit, head_body):
+                limit_pending.append({'claim_id': str(getattr(d, 'claim_id', '')), 'limit': str(limit),
+                                      'reason': _limit_pending_reason(limit, head_body)})
+        # 条件性约束只在条件可能成立、且无法字面证明已照做时才待核。
+        # 过去一律待核，等于把「标题根本没写这件事」也变成必查项：二仙桥、财经、访谈三条任务
+        # 全部候选因此零推荐，而人工对这些标题的判定是可用。
+        for limit in getattr(d, 'conditional_constraints', None) or []:
+            date_only = bool(re.fullmatch(r'\s*\d{1,2}月\d{1,2}日为报道日期[，,]非事件发生日期[。.]?\s*', str(limit)))
+            has_date = bool(re.search(r'\d|[〇零一二三四五六七八九十]{1,4}[年月日号]|今年|去年|前年|明年|今天|昨日|昨天|前天|明天|后天|当日|当天|近日|上周|本周|这周|下周|周[一二三四五六日天]|星期[一二三四五六日天]|上个?月|本月|这个月|下个?月', head_body))
+            if date_only and not has_date:
+                continue
+            if _conditional_trigger_absent(limit, head_body) or _conditional_satisfied(limit, head_body):
+                continue
+            if not _conditional_duration_absent(limit, head_body):
+                limit_pending.append({'claim_id': str(getattr(d, 'claim_id', '')), 'limit': str(limit),
+                                      'reason': '条件性约束需核实是否适用及是否写错'})
     # 限定校验：引用了「limited 且带 required_limits」的陈述时，标题必须表达限定，
     # 否则会把仅见于标题/声称的信息写成确定事实（等评审抓太晚，这里直接拦在生成后）。
+    limit_requirements: list[dict[str, Any]] = []
     if claim_decisions:
         cited = {str(x) for x in (candidate.get("claim_ids") or [])}
         limited_cited = [
@@ -1845,10 +2585,10 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
             if str(getattr(d, "decision", "")) == "limited"
             and getattr(d, "required_limits", None)
             and str(getattr(d, "claim_id", "")) in cited
-            # 「须归属为旁白/剧情叙述」是载体披露，【剧情演绎】前缀已经写明；
-            # 再要求正文重复一次，就与 U-S09 禁止载体元话语直接冲突，形成必死的死锁。
-            # 绑定了具体子事实的归属限定（「但病因须归属」）在标题没提该子事实时也不适用。
-            and any(_limit_needs_body(x, prefix_labels) and not _limit_attribution_scope_absent(x, head_body)
+            # 载体披露（【剧情演绎】已写明）豁免保留；子事实豁免（scope_absent）删除——
+            # 它靠字面匹配判断「标题没提病因」，而「因酒驾昏迷」正是病因断言，测不出。
+            # 测不出就不该静默豁免，该交给评审判断适用性。
+            and any(not _limit_covered_by_narration(x, prefix_labels)
                     for x in (getattr(d, "required_limits", None) or []))
         ]
         if limited_cited:
@@ -1860,15 +2600,30 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
             # 被上面豁免掉的禁令/保留类限定又回到 needs_other，而禁令永远写不进标题 ⇒ 必死。
             limits_flat = [
                 str(x) for d in limited_cited for x in (getattr(d, "required_limits", None) or [])
-                if _limit_needs_body(x, prefix_labels) and not _limit_attribution_scope_absent(x, head_body)
+                if _limit_needs_body(x, prefix_labels, head_body) and not _limit_attribution_scope_absent(x, head_body)
             ]
             needs_attribution = [x for x in limits_flat if _limit_is_attribution(x)]
             needs_other = [x for x in limits_flat if not _limit_is_attribution(x)]
             satisfied = ((not needs_attribution or _has_explicit_source_relation(head_body))
                          and (not needs_other or all(_limit_is_expressed(x, head_body) for x in needs_other)))
-            if not satisfied:
-                codes = "、".join(str(getattr(d, "claim_id", "")) for d in limited_cited)
-                errors.append({"code": "G1_MISSING_LIMIT", "repairable": True, "reason": f"标题引用了需限定的陈述（{codes}），但未表达限定；须在实际正文保留必要范围、条件或可识别信源归属，不能仅自报 qualifiers_used；无法保留时删除该信息"})
+            # 「限定有没有被遵守」是语义判断：词法命中不能证明一致，词法没命中也不能证明违规
+            # （V 集实测 24 条被覆盖的候选里 18 条模型明确判 pass、标题也确实归给了对的人）。
+            # 所以这里不再否决，只把「必须逐条回答的限定」交给评审：
+            #   - limit_requirements 进评审输入，R01 必须在 limit_checks 里逐条给出判定；
+            #   - 没答全 → 单独重问这一条候选；
+            #   - 裁决跟着模型的判定走（violated→revise，unclear→needs_review，satisfied→不改）。
+            # 禁令类例外：被禁词用引号括出且字面出现在标题里，这是词法真正「测出了违反」的
+            # 唯一形态——直接拦；没命中（引号没写、或改写了）仍然交评审，不连坐。
+            for d in limited_cited:
+                for x in (getattr(d, "required_limits", None) or []):
+                    hit = _prohibition_hit(x, head_body)
+                    if hit:
+                        errors.append({"code": "G1_PROHIBITION_HIT", "repairable": True, "reason": f"标题写出被禁内容「{hit}」（限定原文：{str(x)[:60]}），须改写或删除"})
+                    elif not _limit_covered_by_narration(x, prefix_labels):
+                        limit_requirements.append({"claim_id": str(getattr(d, "claim_id", "")), "limit": str(x)})
+            if limit_requirements:
+                codes = "、".join(sorted({x["claim_id"] for x in limit_requirements}))
+                warnings.append({"code": "G1_LIMIT_REVIEW_REQUIRED", "reason": f"标题引用了需限定的陈述（{codes}），须由评审逐条确认", "limits": limit_requirements})
             # 核查争议类限定单独校验：归属语（「某称」）不等于标明争议，
             # 否则「A 称 X」会被判通过，而用户仍把一个有反证的说法当成确定事实。
             disputed = [
@@ -1878,7 +2633,6 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
             if disputed and not any(p in head_body for p in DISPUTE_MARK_PHRASES):
                 codes = "、".join(str(getattr(d, "claim_id", "")) for d in disputed)
                 errors.append({"code": "G1_MISSING_DISPUTE_MARK", "repairable": True, "reason": f"标题引用了存在外部反驳的陈述（{codes}），但未标明争议；须写「存在争议/未经证实/说法不一」等，或改用其他陈述"})
-    warnings: list[dict[str, Any]] = []
     if candidate.get("self_declared_prefixes"):
         warnings.append({"code": "G4_PREFIX_SELF_DECLARED", "reason": f"模型自报非必填前缀：{'、'.join(candidate['self_declared_prefixes'])}（已保留，仅观测）"})
     if head_body.startswith(("【", "[")):
@@ -1887,7 +2641,18 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     allowed_strategies = set(rubric().get("title_policy", {}).get("strategy_enum", []))
     if strategy and allowed_strategies and strategy not in allowed_strategies:
         warnings.append({"code": "Q2_STRATEGY_MISMATCH", "reason": f"策略 {strategy} 不在固定枚举内"})
-    return {"status": "fail" if errors else "pass", "errors": errors, "warnings": warnings, "policy_hits": policy_hits, "title_length": len(rendered), "body_length": len(head_body), "prefix_labels": prefix_labels, "rendered_title": rendered, "max_chars": max_chars}
+    # 归属预判：程序先给字面结论，评审不许再对同一事实报缺（见 _ATTRIBUTION_IDENTITY_RE 注释）。
+    attribution_check: dict[str, Any] | None = None
+    if claim_decisions:
+        _cited = {str(x) for x in (candidate.get("claim_ids") or [])}
+        attr_claims = [d for d in claim_decisions
+                       if str(getattr(d, "claim_id", "")) in _cited and getattr(d, "attribution_required", False)]
+        if attr_claims:
+            phrases = sorted({str(getattr(d, "required_source_phrase") or "") for d in attr_claims
+                              if getattr(d, "required_source_phrase", None)})
+            identity_present = any(p and (p in head_body or p.lstrip("据") in head_body) for p in phrases) or bool(_ATTRIBUTION_IDENTITY_RE.search(head_body))
+            attribution_check = {"required": True, "phrases": phrases, "identity_present": bool(identity_present)}
+    return {"status": "fail" if errors else "pass", "errors": errors, "warnings": warnings, "policy_hits": policy_hits, "limit_pending": limit_pending, "limit_requirements": limit_requirements, "blocked_claim_refs": blocked_refs, "attribution_check": attribution_check, "title_length": len(rendered), "body_length": len(head_body), "prefix_labels": prefix_labels, "rendered_title": rendered, "max_chars": max_chars}
 
 
 def _slot_delivery(candidates: list[dict[str, Any]], decisions: list[dict[str, Any]], thesis_id: Any,
@@ -1945,9 +2710,7 @@ def _slot_status(delivery: list[dict[str, Any]], slot_seen: set[str]) -> dict[st
 # 违规处置动作的严格度：reject（不可发）> review（必须人看）> rewrite（可自动改写后重跑）
 POLICY_ACTION_STRICTNESS = {"reject": 3, "review": 2, "rewrite": 1}
 
-# 纯机械、目标确定的缺陷：修法是确定的（砍到预算内、去掉结尾问号），
-# 不涉及重新判断主旨、看点或归属。这类候选走独立预算的定向修复通道，
-# 不参与 max_rewrite_rounds 的排队，也不会因为同批已有候选合格而被放弃。
+# 纯机械缺陷可定向修复，但与语义重写共享每条 parent 链的轮次预算。
 COMPRESSIBLE_MECHANICAL_CODES = {"G4_LENGTH_EXCEEDED", "G4_ENDING_QUESTION_MARK"}
 
 def _policy_action(rule_ids: list[str], business_policy: dict[str, Any]) -> str | None:
@@ -1961,13 +2724,8 @@ def _policy_action(rule_ids: list[str], business_policy: dict[str, Any]) -> str 
 
 
 def _compressible_defects(candidate: dict[str, Any], decision: dict[str, Any], review: dict[str, Any]) -> list[dict[str, Any]]:
-    """返回这条候选「纯机械、目标确定」的缺陷清单；不属于这一类就返回空。
-
-    只认长度和问号结尾：这两类缺陷的修法是确定的（砍字、去掉问号），
-    不涉及重新判断主旨、看点或归属。带 G1/G3 revise 的候选（缺归属、缺限定、
-    看点跑了）必须走语义重写——把它们混进来会让「压缩」变成偷偷改题。
-    """
-    if (decision or {}).get("status") != "rewrite":
+    """识别可压缩缺陷；仅对超长混合缺限定开放，其余语义缺陷仍不进入。"""
+    if (decision or {}).get("status") not in {"rewrite", "needs_review"}:
         return []
     # 命中了业务政策（含 P9 人身攻击词）就不进压缩通道：压缩只砍字，不会把违规词换掉，
     # 必须走语义重写，让模型按 forbid 清单重新表述。
@@ -1976,12 +2734,61 @@ def _compressible_defects(candidate: dict[str, Any], decision: dict[str, Any], r
     errors = [e for e in ((candidate.get("mechanical_checks") or {}).get("errors") or []) if isinstance(e, dict)]
     if not errors:
         return []
-    if not {str(e.get("code") or "") for e in errors} <= COMPRESSIBLE_MECHANICAL_CODES:
+    codes = {str(e.get("code") or "") for e in errors}
+    mixed = "G4_LENGTH_EXCEEDED" in codes and "G1_MISSING_LIMIT" in codes
+    if not codes <= (COMPRESSIBLE_MECHANICAL_CODES | ({"G1_MISSING_LIMIT"} if mixed else set())):
         return []
-    gates = (review or {}).get("gates") or {}
-    if any(str((gates.get(gate) or {}).get("status") or "needs_review") != "pass" for gate in ("G1", "G2", "G3")):
+    if decision.get("policy_action") == "reject":
+        return []
+    if mixed and any(
+        str(issue.get("issue_code") or "").startswith("G1_") and issue.get("issue_code") != "G1_MISSING_LIMIT"
+        for issue in (decision.get("issues") or []) if isinstance(issue, dict)
+    ):
+        return []
+    gates = (decision or {}).get("gates") or (review or {}).get("gates") or {}
+    allowed = {"pass", "needs_review"} if decision.get("status") == "needs_review" else {"pass"}
+    for gate in ("G1", "G2", "G3"):
+        gate_allowed = allowed | ({"revise"} if mixed and gate == "G1" else set())
+        if str((gates.get(gate) or {}).get("status") or "needs_review") not in gate_allowed:
+            return []
+    return errors
+
+
+def _pending_length_semantic_defects(candidate: dict[str, Any], decision: dict[str, Any]) -> list[dict[str, Any]]:
+    """超长且主旨需修正时，仅生成继承待核状态的隔离草案。"""
+    checks = candidate.get("mechanical_checks") or {}
+    errors = [e for e in checks.get("errors", []) if isinstance(e, dict)]
+    codes = {e.get("code") for e in errors}
+    gates = decision.get("gates") or {}
+    if (decision.get("status") != "needs_review" or decision.get("policy_action")
+            or checks.get("policy_hits") or "G4_LENGTH_EXCEEDED" not in codes
+            or not codes <= {"G4_LENGTH_EXCEEDED", "G4_ENDING_QUESTION_MARK", "G1_MISSING_LIMIT"}
+            or (gates.get("G2") or {}).get("status") != "pass"
+            or (gates.get("G3") or {}).get("status") != "revise"
+            or (gates.get("G1") or {}).get("status") not in {"pass", "needs_review", "revise"}):
         return []
     return errors
+
+
+def _rewrite_depth(candidate: dict[str, Any], candidates: list[dict[str, Any]]) -> int:
+    """沿 parent 链计算已用轮数；缺失或循环的链一律视作预算耗尽。"""
+    by_id = {str(c.get("candidate_id")): c for c in candidates}
+    seen: set[str] = set()
+    depth = 0
+    used = 0
+    while True:
+        marker = candidate.get("rewrite_budget_depth", 0)
+        if not isinstance(marker, int) or marker < 0:
+            return 2
+        used = max(used, depth + marker)
+        if not candidate.get("parent_candidate_id"):
+            return max(depth, used)
+        parent = str(candidate["parent_candidate_id"])
+        if parent in seen or parent not in by_id:
+            return 2
+        seen.add(parent)
+        depth += 1
+        candidate = by_id[parent]
 
 
 def _merge_program_policy_hits(gates: dict[str, Any], mechanical: dict[str, Any]) -> None:
@@ -2025,18 +2832,88 @@ def _merge_program_policy_hits(gates: dict[str, Any], mechanical: dict[str, Any]
     gates["G2"] = gate
 
 
+def _g3_hard_failure(g3: Any) -> bool:
+    """G3 的硬伤形态：标题承诺视频没兑现 / 承诺错配。
+
+    判据是「兑现性」而不是「覆盖完整性」：V 集人工评审 3/3 判 approved 的候选
+    恰恰都是 core_covered=False + delivery_supported=True + matched——覆盖不全
+    （列了菜名没写「可爱日常」、写了主要步骤没写全部步骤）但承诺兑现，人工认为
+    可用。而 delivery_supported=False（视频里没有标题承诺的东西）与 mismatched
+    没有任何人工反例，是必须重写的真错位。
+    """
+    if not isinstance(g3, dict):
+        return False
+    if g3.get("delivery_supported") is False:
+        return True
+    comparison = g3.get("promise_comparison")
+    return isinstance(comparison, dict) and comparison.get("alignment") == "mismatched"
+
+
 def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, schema_errors: list[str], business_policy: dict[str, Any]) -> dict[str, Any]:
     gates = dict(review.get("gates")) if isinstance(review.get("gates"), dict) else {}
     issues = list(review.get("issues")) if isinstance(review.get("issues"), list) else []
     if schema_errors:
-        gates["G4"] = {"status": "fail", "reason": "评审输出结构校验失败", "errors": schema_errors}
+        # 评审模型没按 schema 返回，是「评审侧不可用」，不是标题的机械缺陷。
+        # 旧实现把它写成 gates["G4"]=fail，于是「模型漏写一个字段」被判成「标题不合规」：
+        # 已确认人工判可用的 126 条里，19 条（G4_REPAIRABLE_WITH_INVALID_REVIEW 10、
+        # REVIEW_SCHEMA_INVALID 9）就是这么被拦的，标题本身没有任何问题。
+        cid = str(review.get("candidate_id") or "")
+        unavailable = {"reason": "评审输出结构校验失败", "errors": schema_errors}
         # 评审输出坏了，但机械校验已经给出了确定结论：可修的错误先让它进重写，
         # 否则每条"模型输出超长"都会绕过重写直接塞进人审队列（人审是最贵的一环）。
+        if business_policy.get('status') == 'approved' and business_policy.get('rules'):
+            hit_ids = [str(h.get('rule_id')) for h in mechanical.get('policy_hits', []) if isinstance(h, dict) and h.get('rule_id')]
+            if hit_ids and _policy_action(hit_ids, business_policy) == 'reject':
+                _merge_program_policy_hits(gates, mechanical)
+                return {'candidate_id': review.get('candidate_id'), 'status': 'reject', 'reason': 'POLICY_ACTION_REJECT', 'gates': gates, 'quality_sum': None, 'issues': issues, 'repairable': False, 'review_unavailable': unavailable}
         repairable_mechanical = [e for e in mechanical.get("errors", []) if e.get("repairable")]
         if mechanical.get("status") == "fail" and repairable_mechanical:
-            return {"candidate_id": review.get("candidate_id"), "status": "rewrite", "reason": "G4_REPAIRABLE_WITH_INVALID_REVIEW", "gates": gates, "quality_sum": None, "issues": issues, "repairable": True}
-        return {"candidate_id": review.get("candidate_id"), "status": "needs_review", "reason": "REVIEW_SCHEMA_INVALID", "gates": gates, "quality_sum": None, "issues": issues, "repairable": False}
+            # 重写产物再次评审崩，不再叠加轮次：在坏评审上继续重写只会把
+            # 「一条候选评审失败」放大成整条视频反复调用模型（实测单视频 16 次
+            # model_error、7 次重写循环、30 分钟不收敛）。这一类直接待核。
+            if "-r" in cid:
+                return {"candidate_id": cid, "status": "needs_review", "reason": "REVIEW_SCHEMA_INVALID_ON_REWRITE", "gates": gates, "quality_sum": None, "issues": issues, "repairable": False, "review_unavailable": unavailable}
+            return {"candidate_id": cid, "status": "rewrite", "reason": "G4_REPAIRABLE_WITH_INVALID_REVIEW", "gates": gates, "quality_sum": None, "issues": issues, "repairable": True, "review_unavailable": unavailable}
+        # 评审不可用时，挂着「必须逐条回答的限定」的候选不能被机械 pass 放行：
+        # 没人判过这些限定，等于把可能未核实的说法直接送进交付（旧契约由词法
+        # limit_pending 拦，新契约改看 limit_requirements——判定权给评审，评审
+        # 不在的时候就得留给人）。
+        if [r for r in (mechanical.get("limit_requirements") or []) if isinstance(r, dict)]:
+            return {"candidate_id": cid, "status": "needs_review", "reason": "LIMIT_CHECK_UNANSWERED", "gates": gates, "quality_sum": None, "issues": issues, "repairable": False, "review_unavailable": unavailable}
+        # 机械没有确定缺陷：只报「评审不可用」，不把评审故障算成标题的问题。
+        return {"candidate_id": cid, "status": "needs_review", "reason": "REVIEW_UNAVAILABLE", "gates": gates, "quality_sum": None, "issues": issues, "repairable": False, "review_unavailable": unavailable}
     gates["G4"] = {"status": mechanical["status"], "reason": "程序机械校验", "errors": mechanical["errors"]}
+    # 限定不再由词法否决，改由评审逐条判定：violated→revise，unclear/没答→needs_review。
+    # 词法层只负责「把要回答的限定列出来」，判定权和判定能力对齐。
+    requirements = [r for r in (mechanical.get("limit_requirements") or []) if isinstance(r, dict)]
+    if requirements:
+        checks = _limit_check_verdicts(review)
+        violated = [r for r in requirements if checks.get(_limit_key(r)) == "violated"]
+        unclear = [r for r in requirements if checks.get(_limit_key(r)) not in {"satisfied", "violated"}]
+        g1 = dict(gates.get('G1') or {})
+        if violated:
+            g1['status'] = 'revise'
+            g1['reason'] = "标题未满足限定：" + "；".join(str(r.get("limit"))[:60] for r in violated)
+            g1['limit_checks'] = [dict(r, verdict="violated") for r in violated]
+            gates['G1'] = g1
+        elif unclear and g1.get('status') not in {'reject', 'needs_review'}:
+            g1['status'] = 'needs_review'
+            g1['reason'] = "限定缺少评审判定，需人工核实"
+            g1['limit_checks'] = [dict(r, verdict="unclear") for r in unclear]
+            gates['G1'] = g1
+    # 暂缓核验/已排除陈述的引用：不烧重写、不放行自动交付，交人工核实。
+    # 旧契约把它当 G4_INVALID_REFERENCE（repairable）→ rewrite 循环：V 集 6 条全走重写，
+    # 每条白烧 1 次生成 + 1 次评审，人工最终 5/6 判可用。verification_required 的字面
+    # 语义本来就是「主张需人工核实」——评审判 G1 pass 只说明归属规范，不说明主张
+    # 被核实过。所以压 needs_review（人工成本）而非 rewrite（金钱成本）。
+    blocked_refs = [x for x in (mechanical.get("blocked_claim_refs") or []) if isinstance(x, str)]
+    if blocked_refs:
+        g1 = dict(gates.get('G1') or {})
+        if g1.get('status') == 'pass':
+            g1['status'] = 'needs_review'
+            g1['reason'] = "标题绑定了暂缓核验的陈述（" + "、".join(blocked_refs) + "），需人工确认是否写成断言"
+            g1['blocked_claim_refs'] = blocked_refs
+            gates['G1'] = g1
     if business_policy.get("status") != "approved" or not business_policy.get("rules"):
         gates["G2"] = {"status": "needs_review", "reason": "缺少已批准的业务安全规则", "rule_ids": []}
     _merge_program_policy_hits(gates, mechanical)
@@ -2072,6 +2949,15 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
         status, reason = "needs_review", "CORE_FACT_OR_POLICY_UNRESOLVED"
     elif policy_action == "rewrite":
         status, reason = "rewrite", "POLICY_ACTION_REWRITE"
+    elif (statuses["G1"] == "pass" and statuses["G2"] == "pass" and statuses["G3"] == "revise"
+          and statuses["G4"] == "pass" and all(isinstance(x, int) and x >= quality_min for x in scores)
+          and not _g3_hard_failure(gates.get("G3") or {})):
+        # 只剩 G3「核心覆盖」一条**软** revise 时不再自动重写：V 集人工评审这种组合
+        # 4/4 判 approved（「列菜名」人工够用，评审要求覆盖「可爱日常核心」——评审的
+        # 核心覆盖标准比人严）。自动重写每条烧 2 次调用还未必更好，降为 needs_review
+        # 交人工。G3 硬伤（core_covered=False / delivery_supported=False / 承诺错配）
+        # 与 G1/G4 的 revise 仍走重写——那是可定向修复的真问题。
+        status, reason = "needs_review", "G3_REVISION_REQUIRES_HUMAN_CALL"
     elif statuses["G4"] == "fail" or any(status == "revise" for status in statuses.values()) or any(isinstance(x, int) and x < quality_min for x in scores):
         status, reason = "rewrite", "REPAIRABLE_GATE_OR_QUALITY_ISSUE"
     elif all_pass and all(isinstance(x, int) and x >= quality_min for x in scores):
@@ -2187,8 +3073,14 @@ class Pipeline:
         self.storage.checkpoint(task_id, "generating", state, "N03V", "verification", {"risk_level": summary["level"], "claim_count": len(audit_rows)})
         return summary
 
-    def _call(self, task_id: str, node: str, name: str, user: dict[str, Any], schema: str, adapter: ModelAdapter | None = None) -> dict[str, Any]:
-        system = prompt_for(name, schema)
+    def _call(self, task_id: str, node: str, name: str, user: dict[str, Any], schema: str, adapter: ModelAdapter | None = None, rules: dict[str, Any] | None = None) -> dict[str, Any]:
+        # 规则全文进 system 的公共前缀段，不进 user：同一个任务的 5 个节点共用一份
+        # 规则，只有「从第一个 token 起完全一致」才吃得到前缀缓存，而 user 里每个
+        # 节点拼的载荷各不相同，放那里等于逐次重付 8.3K 字符（实测 review 一份
+        # 载荷里 27.6% 是规则全文）。
+        system_base = prompt_for(name, schema)
+        rules_block = prompt_text_from_context(rules) if rules else ""
+        system = prompt_for(name, schema, rules_block)
         selected_adapter = adapter or self.adapter
         canonical_request = json.dumps({"system": system, "user": user, "schema": schema, "model": str(getattr(selected_adapter, "model", "mock"))}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
@@ -2199,8 +3091,25 @@ class Pipeline:
         model_name = str(getattr(selected_adapter, "model", self.config.review_model if name == "review" else self.config.generation_model))
         started = time.monotonic()
         self.storage.event(task_id, node, "node_started", {"task": name, "schema": schema, "model": model_name, "request_hash": request_hash})
-        self.storage.event(task_id, node, "prompt_snapshot", {"task": name, "schema": schema, "model": model_name, "prompt_file": prompt_file, "prompt_constant": prompt_constant, "prompt_hash": prompt_hash, "request_hash": request_hash, "system_prompt": system, "user_payload": user})
+        # 快照存「不含规则块」的 system + 规则块指纹，不存全文：规则 8.3K 字符 × 每任务
+        # 8–12 次调用会把事件表撑大一倍，而规则可以按 rule_ids 从 rulepacks/*.md 逐字重建，
+        # rule_bundle_hash 已随 N04 落库。prompt_hash/request_hash 仍按完整 system 计算，
+        # 与真实发给模型的请求一致。
+        self.storage.event(task_id, node, "prompt_snapshot", {
+            "task": name, "schema": schema, "model": model_name, "prompt_file": prompt_file,
+            "prompt_constant": prompt_constant, "prompt_hash": prompt_hash, "request_hash": request_hash,
+            "system_prompt": system_base, "system_chars": len(system),
+            "rules_block_chars": len(rules_block),
+            "rules_block_hash": hashlib.sha256(rules_block.encode("utf-8")).hexdigest() if rules_block else None,
+            "user_payload": user,
+        })
+        candidate_ids = [str(c.get("candidate_id") or "") for c in user.get("candidate_titles", [])] if name == "review" and schema == "ReviewResultBatch" else None
         cached = self.storage.cached_model_reply(task_id, request_hash)
+        if cached is not None and candidate_ids is not None:
+            error = _review_batch_structure_error(cached, candidate_ids) if isinstance(cached, dict) else "cached reply must be an object"
+            if error:
+                self.storage.event(task_id, node, "model_cache_invalid", {"task": name, "request_hash": request_hash, "error": error})
+                cached = None
         if cached is not None:
             self.storage.event(task_id, node, "model_cache_hit", {"task": name, "request_hash": request_hash, "prompt_hash": prompt_hash})
             self.storage.event(task_id, node, "node_completed", {"task": name, "request_hash": request_hash, "duration_ms": int((time.monotonic() - started) * 1000), "cached": True})
@@ -2215,12 +3124,21 @@ class Pipeline:
                     "error": str(last),
                     # 只回错误码，模型会换个位置再坏一次；把断点原文回给它才可能真修好。
                     "previous_output_tail": (getattr(last, "raw", "") or "")[-600:],
-                    "instruction": "上一次输出不是合法 JSON。请只返回一个严格合法的 JSON 对象：键与字符串都用双引号，字符串内部的引号必须转义成 \" ；不要尾逗号，不要 markdown 代码块，不要任何解释文字。若内容太长被截断，请压缩各字段的说明文字，保留全部必需字段。",
+                    "instruction": "上一次输出的 JSON 或结构不合要求。请返回严格合法的 JSON 对象，按要求完整覆盖每个候选并保留全部必需字段；不要尾逗号、代码块或解释文字。若内容太长，请压缩说明文字。",
                 },
             }
             try:
                 reply = selected_adapter.complete(task=name, system=system, user=attempt_user, schema=schema, attempt=attempt)
                 if reply.status != "ok" or not isinstance(reply.data, dict): raise ModelError("invalid model response", True)
+                if candidate_ids is not None:
+                    structure_error = _review_batch_structure_error(reply.data, candidate_ids)
+                    if structure_error:
+                        # 无效回复仍有实际调用成本，但绝不作为 model_reply 缓存或放行。
+                        # 必须把原文带进异常：重试提示里的 previous_output_tail 取自 exc.raw，
+                        # 不带就等于让模型盲改，只会把同类错误再犯一遍（实测重试到 attempt 2 仍失败）。
+                        broken = reply.raw_text or json.dumps(reply.data, ensure_ascii=False)
+                        self.storage.event(task_id, node, "model_reply_invalid", {"task": name, "attempt": attempt, "request_hash": request_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "error": structure_error, "raw_output": broken[:6000]})
+                        raise ModelError(f"invalid review structure: {structure_error}", True, raw=broken)
                 self.storage.event(task_id, node, "model_reply", {"task": name, "attempt": attempt, "request_hash": request_hash, "prompt_hash": prompt_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "data": reply.data})
                 self.storage.event(task_id, node, "node_completed", {"task": name, "attempt": attempt, "request_hash": request_hash, "duration_ms": int((time.monotonic() - started) * 1000), "model_latency_ms": reply.latency_ms, "cached": False})
                 return reply.data
@@ -2232,38 +3150,63 @@ class Pipeline:
         raise last or ModelError("model call failed", False)
 
     def _review_with_fallback(self, task_id: str, video: Any, state: dict[str, Any], candidates: list[dict[str, Any]], checks: list[dict[str, Any]]) -> dict[str, Any]:
-        """一次评审多个候选；整批解析失败时退化为逐条评审。
+        """一次评审多个候选；整批解析失败、或显式配置时退化为逐条评审。
 
         真实故障：三个候选一起评，模型输出的 JSON 在第二个候选处结构坏掉，
         重试三次仍然坏，整条视频被判 technical_failed——三个候选一条都没留下。
         逐条评审让小请求更不容易坏，也让"坏一条"不再等于"全灭"。
+
+        2026-11-04 大批次实测补充：整批请求的失败不是偶发。V 集 20 条累计 50 次
+        无效调用，一次评 3 个候选时模型要么只写 1100–2300 tokens 把必填字段漏掉，
+        要么失控写到 max_tokens=16384 被砍断（26%）；同一条输入拆成单候选后输出
+        降到 900–2400 tokens 且一次通过。所以逐条不只是"兜底"，在长载荷下它才是
+        默认该走的路——`review_per_candidate` 打开后不再先赌整批。
         """
+        if getattr(self.config, "review_per_candidate", False) and len(candidates) > 1:
+            return self._review_per_candidate(task_id, video, state, candidates, checks, reason="configured")
         try:
-            return self._call(task_id, "R01", "review", self._review_input(video, state, candidates, checks), "ReviewResultBatch", self.review_adapter)
+            return self._call(task_id, "R01", "review", self._review_input(video, state, candidates, checks), "ReviewResultBatch", self.review_adapter, rules=state.get("rules"))
         except ModelError as exc:
             # 付款、鉴权等不可重试错误不能降级成逐候选请求，否则只会重复失败。
-            if not exc.retryable or len(candidates) <= 1:
+            if not exc.retryable:
                 raise
             self.storage.event(task_id, "R01", "review_batch_degraded", {"candidates": len(candidates), "error": str(exc)[:300]})
+        return self._review_per_candidate(task_id, video, state, candidates, checks, reason="batch_failed")
+
+    def _review_per_candidate(self, task_id: str, video: Any, state: dict[str, Any], candidates: list[dict[str, Any]], checks: list[dict[str, Any]], *, reason: str) -> dict[str, Any]:
+        """每个候选单独一次请求，坏一条不再连坐其余候选。"""
         merged: dict[str, Any] = {"reviews": []}
         failures: list[str] = []
         for candidate in candidates:
             cid = str(candidate.get("candidate_id") or "")
             single_checks = [c for c in checks if str(c.get("candidate_id") or "") == cid]
             try:
-                one = self._call(task_id, "R01", "review", self._review_input(video, state, [candidate], single_checks), "ReviewResultBatch", self.review_adapter)
+                one = self._call(task_id, "R01", "review", self._review_input(video, state, [candidate], single_checks), "ReviewResultBatch", self.review_adapter, rules=state.get("rules"))
             except ModelError as exc:
-                failures.append(cid)
-                self.storage.event(task_id, "R01", "review_single_failed", {"candidate_id": cid, "error": str(exc)[:200]})
-                continue
-            merged["reviews"].extend(one.get("reviews") or [])
-            if one.get("rubric_version"):
+                if not exc.retryable:
+                    raise
+                # 整批先坏、逐条再坏，实测会停在「只差一条」：cand-1 连续两次漏 quality，
+                # 整条视频因此零推荐。逐条请求本身很小，再给一次机会仍是有界的。
+                self.storage.event(task_id, "R01", "review_single_retry", {"candidate_id": cid, "error": str(exc)[:200]})
+                try:
+                    one = self._call(task_id, "R01", "review", self._review_input(video, state, [candidate], single_checks), "ReviewResultBatch", self.review_adapter, rules=state.get("rules"))
+                except ModelError as retry_exc:
+                    if not retry_exc.retryable:
+                        raise
+                    failures.append(cid)
+                    self.storage.event(task_id, "R01", "review_single_failed", {"candidate_id": cid, "error": str(retry_exc)[:200]})
+                    continue
+            merged["reviews"].extend(_normalize_reviews(one, [cid]))
+            # thesis_consistency 是任务级结论（两份主旨契约的关系），逐条请求会各自重算；
+            # 旧实现整段丢掉它，只能退回词法兜底。这里保留首次出现的判定。
+            if "thesis_consistency" not in merged and isinstance(one.get("thesis_consistency"), dict):
+                merged["thesis_consistency"] = one["thesis_consistency"]
+            if one.get("rubric_version") and "rubric_version" not in merged:
                 merged["rubric_version"] = one["rubric_version"]
-        if not merged["reviews"]:
-            raise ModelError(f"批量评审与逐条评审均失败：{','.join(failures) or '无候选'}", retryable=False)
         merged["degraded_to_per_candidate"] = True
+        merged["per_candidate_reason"] = reason
         merged["degraded_failures"] = failures
-        self.storage.event(task_id, "R01", "review_batch_degraded_complete", {"recovered": len(merged["reviews"]), "failed": failures})
+        self.storage.event(task_id, "R01", "review_batch_degraded_complete", {"recovered": len(merged["reviews"]), "failed": failures, "reason": reason})
         return merged
 
     def _business_policy(self) -> dict[str, Any]:
@@ -2468,8 +3411,8 @@ class Pipeline:
             state["rule_bundle_hash"] = hashlib.sha256(json.dumps(state["rules"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             self.storage.event(task_id, "N04", "rule_match", rule_bundle.as_context())
             self.storage.checkpoint(task_id, "generating", state, "N04", "rules", {"rule_ids": state["rules"].get("rule_ids", []), "rule_bundle_hash": state["rule_bundle_hash"]})
-            boundary_payload = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "primary_evidence_audit": primary_audit, "rules": [asdict(x) for x in load_rules()], "matched_rules": rule_bundle.as_context()}
-            boundary_raw = self._call(task_id, "N05", "boundary", boundary_payload, "BoundarySet")
+            boundary_payload = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "primary_evidence_audit": primary_audit, "rules": [asdict(x) for x in load_rules()], "matched_rule_ids": rule_bundle.rule_ids}
+            boundary_raw = self._call(task_id, "N05", "boundary", boundary_payload, "BoundarySet", rules=rule_bundle.as_context())
             claim_text_map = {c.claim_id: c.text for c in understanding.claims}
             claim_evidence_map = {c.claim_id: list(c.evidence_refs) for c in understanding.claims}
             boundary = _normalize_boundary(boundary_raw, claim_text_map, claim_evidence_map)
@@ -2488,7 +3431,7 @@ class Pipeline:
                     "error": f"上一次返回里有 {len(missing_boundary_ids)} 条 claim 没有给出 decision（收到 {len(boundary.decisions)} 条决策）。",
                     "instruction": "必须为输入里的每一条 claim 都给出 decision（usable / limited / excluded / verification_required），放在顶层 decisions 或 claims 数组里；不要只给 claims_summary 这类摘要。",
                 }}
-                boundary_raw = self._call(task_id, "N05", "boundary", boundary_payload, "BoundarySet")
+                boundary_raw = self._call(task_id, "N05", "boundary", boundary_payload, "BoundarySet", rules=rule_bundle.as_context())
                 boundary = _normalize_boundary(boundary_raw, claim_text_map, claim_evidence_map)
                 if _missing_boundary_claims(boundary):
                     # 二次仍漏答：不再重试，但把漏答记进 state，事后能区分「模型漏答」与「材料不可用」。
@@ -2590,8 +3533,8 @@ class Pipeline:
                 "events": to_dict(understanding.events),
                 "turns": to_dict(understanding.turns),
                 "structural_candidates": structures,
-                "boundary": to_dict(boundary), "matched_rules": rule_bundle.as_context(),
-            }, "HighlightSet")
+                "boundary": to_dict(boundary), "matched_rule_ids": rule_bundle.rule_ids,
+            }, "HighlightSet", rules=rule_bundle.as_context())
             if bool(highlight_raw.get("abandon") or highlight_raw.get("no_viable_highlight")):
                 # 没有结构候选就没有程序兜底：看点缺失即明确停下，不补造主语或关系。
                 state["highlight_selection"] = {"abandoned": True, "reason": str(highlight_raw.get("reason") or ""), "eliminated": highlight_raw.get("eliminated", [])}
@@ -2640,7 +3583,7 @@ class Pipeline:
             candidates = self._repair_mechanical_pass(task_id, state, video, understanding, boundary, highlights, candidates, 0)
             if candidates["route"]["action"] == "rewrite":
                 state["reviews"] = candidates["reviews"]
-                for round_no in range(1, self.config.max_rewrite_rounds + 1):
+                for round_no in range(1, min(2, self.config.max_rewrite_rounds) + 1):
                     state["rewrite_round"] = round_no
                     targets = candidates["route"].get("rewrite_targets") or [
                         {"candidate_id": candidates["route"].get("rewrite_candidate_id"), "mode": candidates["route"].get("rewrite_mode", "表达")}
@@ -2659,28 +3602,28 @@ class Pipeline:
                             "video": to_dict(video), "claims": to_dict(understanding.claims),
                             "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions),
                             "events": to_dict(understanding.events), "turns": to_dict(understanding.turns),
-                            "structural_candidates": structures, "boundary": to_dict(boundary), "matched_rules": rule_bundle.as_context(),
+                            "structural_candidates": structures, "boundary": to_dict(boundary), "matched_rule_ids": rule_bundle.rule_ids,
                             "previous_thesis_contract": state.get("thesis_contract", {}), "independent_thesis_contract": state.get("review_thesis_contract", {}),
                             "review_issues": [i for r in candidates["reviews"] for i in r.get("issues", [])],
-                        }, "HighlightSet")
+                        }, "HighlightSet", rules=rule_bundle.as_context())
                         retry_contract, retry_errors = normalize_thesis_contract(retry_raw, understanding, boundary)
                         retry_highlights = _normalize_highlights(retry_raw, {d.claim_id for d in allowed}, [])
+                        retry_demoted = _enforce_single_mainline(retry_contract, understanding, video)
                         retry_errors += validate_highlight_alignment(retry_highlights, retry_contract)
                         if retry_raw.get("abandon") or retry_raw.get("no_viable_highlight") or retry_errors:
                             state["highlight_reselection_errors"] = retry_errors or ["无法选择可交付主看点"]
                             candidates["route"] = {"action": "needs_review", "reason": "HIGHLIGHT_RESELECTION_INVALID", "recommended_candidate_id": None, "eligible_candidate_ids": []}
                             break
                         highlights = retry_highlights
-                        # 重选看点会给出全新的主旨契约，旧契约上的主线降级随之丢失：
-                        # 不在这里重新收敛一次，core_unit_ids 会退回「合集」，core_hook 又去写尾段。
-                        retry_demoted = _enforce_single_mainline(retry_contract, understanding, video)
+                        # 收敛后的契约已完成对齐校验，不能先校验再改变核心集合。
                         if retry_demoted:
                             state["mainline_demoted_units"] = retry_demoted
                             self.storage.event(task_id, "N07", "mainline_demoted", {"kept": retry_contract.get("core_unit_ids"), "demoted": retry_demoted, "source": "highlight_reselected"})
                         state["thesis_contract"] = retry_contract
                         state["thesis_contract_errors"] = []
                         state["thesis_alignment_errors"] = []
-                        state["main_highlight_relation"] = "core"
+                        retry_main = next((h for h in highlights if h.role == "main"), None)
+                        state["main_highlight_relation"] = str(getattr(retry_main, "relation", "") or "")
                         state["highlights"] = to_dict(highlights)
                         self.storage.event(task_id, "N07", "highlight_reselected", {"thesis_id": retry_contract["thesis_id"]})
                         # 主旨发生修正后，旧候选不能在新契约下被复活；重新生成并独立评审。
@@ -2694,7 +3637,10 @@ class Pipeline:
                         source = next((c for c in candidates["candidates"] if c["candidate_id"] == target.get("candidate_id")), None)
                         if source is None:
                             continue
-                        rewritten = self._generate_and_review(task_id, state, video, understanding, boundary, highlights, round_no, source, known_candidates=candidates["candidates"])
+                        depth = _rewrite_depth(source, candidates["candidates"])
+                        if depth >= min(2, self.config.max_rewrite_rounds):
+                            continue
+                        rewritten = self._generate_and_review(task_id, state, video, understanding, boundary, highlights, depth + 1, source, known_candidates=candidates["candidates"])
                         candidates["candidates"] += rewritten["candidates"]
                         candidates["reviews"] += rewritten["reviews"]
                         candidates["decisions"] += rewritten["decisions"]
@@ -2874,7 +3820,7 @@ class Pipeline:
             state["semantic_use_bindings"] = semantic_bindings
             self.storage.event(task_id, "N03", "semantic_use_downgraded", {"units": semantic_bindings, "source": "rereview"})
         state["understanding"] = to_dict(understanding)
-        required = normalize_prefix_labels(required_prefixes(format=video.format, attributes=understanding.attributes), signal_report["required_prefixes"])
+        required = normalize_prefix_labels([], required_prefixes(format=video.format, attributes=understanding.attributes, domain=video.domain, evidence=video.evidence) + signal_report["required_prefixes"])
         state["required_prefixes"] = required
         boundary = _normalize_boundary(state.get("boundary", {}))
         state["reference_audit"] = audit_evidence(understanding, video, boundary)
@@ -2882,18 +3828,17 @@ class Pipeline:
         state["source_only_claim_ids"] = [c.claim_id for c in understanding.claims if c.evidence_refs and all(evidence_types.get(r) == "source" for r in c.evidence_refs)]
         boundary, _ = _apply_primary_evidence_guard(boundary, _primary_evidence_audit(understanding, video), understanding)
         state["boundary"] = to_dict(boundary)
-        # 重评同样要按边界收窄可引用单元，否则已排除单元会在重评里被放行
-        if boundary.unit_decisions:
-            rereview_units = {d.unit_id for d in boundary.unit_decisions if d.decision != "excluded"}
-        else:
-            rereview_units = {u.unit_id for u in understanding.semantic_units}
+        # 重评同样要按边界收窄可引用单元，否则已排除单元会在重评里被放行。
+        # 集合构造与初评共用 _allowed_unit_ids：两边各写一套时，结构片段的 turn-N 只在
+        # 一边被认，候选就被判成「任务范围外」（2026-11-03 复测的 4 条误拦）。
+        rereview_units = _allowed_unit_ids(understanding, boundary, state.get("highlights") or [])
         for c in state["candidates"]:
             # 重评必须与初次生成共用同一个有效集合：待核验的 claim 不能因为"再评一次"就重新进白名单
             c["mechanical_checks"] = _mechanical_check(c, allowed_claims={d.claim_id for d in boundary.decisions if d.decision != "excluded" and not d.verification_required}, allowed_highlights={h["highlight_id"] for h in state.get("highlights", [])}, evidence_ids={e.evidence_id for e in video.evidence}, max_chars=self.config.max_chars, allowed_units=rereview_units, required_prefixes=required, claim_decisions=boundary.decisions)
             if c.get("slot_id") == "core_hook":
                 snapshot_highlights = state.get("highlights") or []
                 main_hl = next((h.get("highlight_id") for h in snapshot_highlights if h.get("role") == "main"), None)
-                if main_hl and c.get("highlight_id") != main_hl:
+                if main_hl and not _core_hook_is_aligned(c, snapshot_highlights, state.get("thesis_contract") or {}):
                     c["mechanical_checks"]["errors"].append({
                         "code": "G4_HOOK_OFF_MAINLINE", "repairable": True,
                         "reason": f"核心钩子必须绑定主看点 {main_hl}，不得换成其它片段（当前 {c.get('highlight_id')}）"})
@@ -2906,7 +3851,7 @@ class Pipeline:
             errors = check_signal_constraints(c.get("headline", ""), signal_report, understanding.claims, c.get("claim_ids", []))
             texts = [e.text for e in video.evidence if e.evidence_id in refs and e.field != "frame" and e.quality not in {"model_derived_uncalibrated", "unverified_source_metadata"}]
             if unsupported_numeric_facts(c.get("headline", ""), texts):
-                errors.append({"code": "G4_NUMERIC_CONFLICT", "repairable": True, "reason": "重新评审发现数字缺引用证据支持"})
+                errors.append({"code": "G4_NUMERIC_CONFLICT", "repairable": True, "reason": "重新评审发现数字、单位或金额口径没有引用证据支持（如原文「400亿美元」写成「400亿」）"})
             c["mechanical_checks"]["errors"].extend(errors)
             if errors:
                 c["mechanical_checks"]["status"] = "fail"
@@ -2916,12 +3861,13 @@ class Pipeline:
                           if d.attribution_required and d.claim_id in set(c.get("claim_ids", []))]
             if _declares_narration(c.get("prefix_labels")) and rr_phrases and all(_carrier_only_source(x) for x in rr_phrases):
                 required_claims = set()
-            if required_claims.intersection(c.get("claim_ids", [])) and not _has_explicit_source_relation(c.get("headline", "")):
+            if required_claims.intersection(c.get("claim_ids", [])) and not _has_explicit_source_relation(c.get("headline", ""), rr_phrases) \
+                    and not _attribution_identity_present(c.get("headline", ""), rr_phrases):
                 c["programmatic_g1_flags"].append({"code": "G1_SOURCE_ATTRIBUTION_MISSING", "repairable": True, "reason": "本条边界明确要求来源归属，但标题未表达转述关系"})
         checks = [{"candidate_id": c.get("candidate_id"), **c["mechanical_checks"], "programmatic_g1_flags": c.get("programmatic_g1_flags", [])} for c in state["candidates"]]
         review_raw = self._review_with_fallback(task_id, video, state, state["candidates"], checks)
         reviews = _normalize_reviews(review_raw, [c["candidate_id"] for c in state["candidates"]])
-        reviews, decisions = self._validate_and_decide_reviews(video, state, state["candidates"], reviews, checks)
+        reviews, decisions = self._validate_and_decide_reviews(video, state, state["candidates"], reviews, checks, task_id)
         route = self._route_candidates(decisions, state.get("rewrite_round", 0))
         # 重评只重新裁决既有候选，不生成新标题：与初次生成一致，重写预算用尽即停下，
         # 不能因为「再评一次」又重新打开重写循环。
@@ -2948,24 +3894,72 @@ class Pipeline:
         return task_id
 
     def _review_input(self, video: Any, state: dict[str, Any], candidates: list[dict[str, Any]], mechanical_checks: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
+        payload = {
             "video_materials": {"title": video.title, "author": video.author, "domain": video.domain, "format": video.format, "description": video.description, "caption": video.caption, "asr_segments": video.asr_segments, "ocr_segments": video.ocr_segments},
             "evidence": to_dict(video.evidence),
             "claims": state.get("understanding", {}).get("claims", []),
             "risk_signals": state.get("risk_signals", {}),
             "boundary": state.get("boundary", {}),
+            # 暂缓核验/已排除的陈述清单：生成侧一直有，评审侧此前缺失——模型不知道
+            # 哪些主张被暂缓，无法判断「标题是否把它写成了断言」。G1 若 pass，
+            # 程序还会把 needs_review 压回去（_decide_candidate 的 blocked_refs 分支），
+            # 但评审自己看到清单才能给出有意义的理由。
+            "blocked_claims": [
+                {"claim_id": d.get("claim_id"), "text": next((c.get("claim_text") or c.get("text") or "" for c in state.get("understanding", {}).get("claims", []) if c.get("claim_id") == d.get("claim_id")), ""),
+                 "reason": "暂缓核验" if d.get("verification_required") else "已排除", "unresolved": bool(d.get("verification_required"))}
+                for d in (state.get("boundary") or {}).get("decisions", [])
+                if d.get("decision") == "excluded" or d.get("verification_required")
+            ],
             "highlights": state.get("highlights", []),
             "thesis_contract": state.get("thesis_contract", {}),
             "review_thesis_contract": state.get("review_thesis_contract", {}),
-            "matched_rules": state.get("rules", {}),
+            "matched_rule_ids": (state.get("rules") or {}).get("rule_ids", []),
             "business_policy": state.get("business_policy", {"status": "missing", "rules": [], "version": None}),
             "display_config": {"max_chars": self.config.max_chars, "prefix_labels": state.get("required_prefixes", []), "counting": "前缀与正文合计不超过 max_chars", "ending_question_mark_forbidden": True},
             "mechanical_checks": mechanical_checks,
+            # 限定必答项：机械层登记的每条限定，评审必须在 limit_checks 里逐条给出
+            # satisfied / violated / unclear + reason。这是 2026-11-04 契约变更的对称面：
+            # 词法不再判语义，漏答在结构上不允许。
+            "limit_instructions": {
+                "requirement": "对 mechanical_checks[*].limit_requirements 里的每一条限定，在对应候选的 limit_checks 数组中逐条回答",
+                "verdicts": "satisfied（标题已满足）/ violated（标题违反）/ unclear（证据不足无法判定）",
+                "note": "词法层已不再代答；判定权在评审，漏答会被单独重问",
+                "requirements_by_candidate": [
+                    {"candidate_id": c.get("candidate_id"),
+                     "limits": [r for r in (next((m for m in mechanical_checks if str(m.get("candidate_id") or "") == str(c.get("candidate_id") or "")), {}).get("limit_requirements") or [])]}
+                    for c in candidates
+                ],
+            },
             "candidate_titles": [{"candidate_id": c.get("candidate_id"), "title": c.get("headline"), "prefix_labels": c.get("prefix_labels", []), "rendered_title": c.get("rendered_title") or render_title(c), "claim_ids": c.get("claim_ids", []), "highlight_id": c.get("highlight_id"), "evidence_ids": c.get("evidence_ids", []), "strategy": c.get("expression_strategy"), "qualifiers_used": c.get("qualifiers_used", [])} for c in candidates],
             "rubric": rubric(),
         }
+        if getattr(self.config, "review_input_scope", "full") == "compact":
+            payload = _compact_review_payload(payload)
+        return payload
 
-    def _validate_and_decide_reviews(self, video: Any, state: dict[str, Any], candidates: list[dict[str, Any]], reviews: list[dict[str, Any]], mechanical_checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _retry_single_review(self, task_id: str, video: Any, state: dict[str, Any], candidate: dict[str, Any], checks: dict[str, Any] | None, errors: list[str]) -> dict[str, Any] | None:
+        """整批通过但某条候选结构不合格时，单独重问这一条一次。
+
+        实测：三条一起评时模型整体返回合法，cand-1 却漏了 quality；整批校验按「一条坏、整批降级」
+        处理会直接丢掉一条机械检查干净的候选。这里只重问坏的那条，并把它自己的错误带回去。
+        """
+        try:
+            user = self._review_input(video, state, [candidate], [checks] if checks else [])
+            user["_previous_output_error"] = "；".join(str(e) for e in errors)[:800]
+            user["_instruction"] = ("上一次回复结构不合格（见 _previous_output_error）。每个候选都必须给全 "
+                                    "gates（G1/G2/G3）与 quality（Q1/Q2/Q3，各含 score 与 reason），不得省略。")
+            raw = self._call(task_id, "R01", "review", user, "ReviewResultBatch", self.review_adapter, rules=state.get("rules"))
+        except ModelError as exc:
+            if not exc.retryable:
+                raise
+            self.storage.event(task_id, "R01", "review_candidate_retry_failed",
+                               {"candidate_id": candidate.get("candidate_id"), "error": str(exc)[:200]})
+            return None
+        normalized = _normalize_reviews(raw, [str(candidate.get("candidate_id"))])
+        self.storage.event(task_id, "R01", "review_candidate_retry", {"candidate_id": candidate.get("candidate_id")})
+        return normalized[0] if normalized else None
+
+    def _validate_and_decide_reviews(self, video: Any, state: dict[str, Any], candidates: list[dict[str, Any]], reviews: list[dict[str, Any]], mechanical_checks: list[dict[str, Any]], task_id: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         evidence_ids = {e.evidence_id for e in video.evidence}
         rule_ids = set(rubric().get("rule_ids", []))
         policy_rule_ids = {str(x.get("rule_id")) for x in state.get("business_policy", {}).get("rules", []) if isinstance(x, dict) and x.get("rule_id")}
@@ -2996,7 +3990,27 @@ class Pipeline:
             programmatic_g1_flags = mechanical.get("programmatic_g1_flags", [])
             if any(x.get("code") == "G1_SOURCE_ATTRIBUTION_MISSING" for x in programmatic_g1_flags):
                 review["gates"]["G1"] = {"status": "revise", "reason": "可识别信源缺少明确转述关系", "evidence_ids": [], "rule_ids": []}
-            validation_errors = validate_review(review, evidence_ids=evidence_ids, rule_ids=rule_ids, issue_codes=set(rubric().get("issue_codes", [])), policy_rule_ids=policy_rule_ids)
+            # 限定必答项的覆盖校验：机械层登记的每条 requirement 都必须有评审判定。
+            # 漏答作为 validation_error 进已有重问通道（单条重问，带错误说明），
+            # 重问后仍缺 → unclear 语义，_decide_candidate 会给 needs_review。
+            limit_gaps = _limit_check_coverage_errors(review, mechanical)
+            validation_errors = validate_review(review, evidence_ids=evidence_ids, rule_ids=rule_ids, issue_codes=set(rubric().get("issue_codes", [])), policy_rule_ids=policy_rule_ids) + limit_gaps
+            if validation_errors and task_id and not review.get("_candidate_retried"):
+                # 整批回复合法、只有这一条漏字段时，单独重问这一条，别把整批降级成待核。
+                retried = self._retry_single_review(task_id, video, state, candidate, checks_by_id.get(cid), validation_errors)
+                if retried is not None:
+                    retried["_candidate_retried"] = True
+                    review = retried
+                    review.setdefault("_normalization_errors", [])
+                    if not isinstance(review.get("issues"), list):
+                        review["issues"] = []
+                    if not isinstance(review.get("rewrite_guidance"), dict):
+                        review["rewrite_guidance"] = {"preserve": [], "modify": [], "forbidden": []}
+                    if not isinstance(review.get("gates"), dict):
+                        review["gates"] = {}
+                    if any(x.get("code") == "G1_SOURCE_ATTRIBUTION_MISSING" for x in programmatic_g1_flags):
+                        review["gates"]["G1"] = {"status": "revise", "reason": "可识别信源缺少明确转述关系", "evidence_ids": [], "rule_ids": []}
+                    validation_errors = validate_review(review, evidence_ids=evidence_ids, rule_ids=rule_ids, issue_codes=set(rubric().get("issue_codes", [])), policy_rule_ids=policy_rule_ids) + _limit_check_coverage_errors(review, mechanical)
             if any(x.get("code") == "G4_CHECK_MISSING" for x in mechanical.get("errors", [])):
                 validation_errors.append("programmatic G4 check missing")
             for mechanical_error in mechanical.get("errors", []):
@@ -3044,14 +4058,28 @@ class Pipeline:
                 issue = {"issue_id": f"{cid}-{flag.get('code')}", "primary_dimension": "G1", "issue_code": flag.get("code"), "severity": "high", "repairable": bool(flag.get("repairable")), "problem_span": candidate.get("headline", ""), "evidence_ids": [], "rule_ids": [], "reason": flag.get("reason", "G1 程序规则校验失败"), "action": "补充明确的信源转述关系后重新评审"}
                 if not any(i.get("issue_code") == issue["issue_code"] for i in review.get("issues", []) if isinstance(i, dict)):
                     review.setdefault("issues", []).append(issue)
-            # 主旨覆盖判定：评审在 G3 里显式给 core_covered=false，即使 gate 状态误写成 pass 也须纠正，
-            # 回看点选择修核心，而不是凭「视频里确实出现过该片段」放行。
+            # 两项独立判断都不能与 pass 同时成立；只处理模型明确给出的 False，
+            # 不把缺失字段、无法判断或关键词命中冒充语义结论。
             g3_gate = review.get("gates", {}).get("G3", {})
-            if isinstance(g3_gate, dict) and g3_gate.get("status") == "pass" and g3_gate.get("core_covered") is False:
-                review["gates"]["G3"] = {**g3_gate, "status": "revise"}
-                core_issue = {"issue_id": f"{cid}-G3_CORE_POINT_OMITTED", "primary_dimension": "G3", "issue_code": "G3_CORE_POINT_OMITTED", "severity": "high", "repairable": True, "problem_span": candidate.get("headline", ""), "evidence_ids": g3_gate.get("evidence_ids", []) or [], "rule_ids": g3_gate.get("rule_ids", []) or [], "reason": str(g3_gate.get("reason") or "标题未覆盖视频核心观看承诺"), "action": "回到看点选择，改用核心主旨表达", "rollback_to": "N07"}
-                if not any(i.get("issue_code") == "G3_CORE_POINT_OMITTED" for i in review.get("issues", []) if isinstance(i, dict)):
-                    review.setdefault("issues", []).append(core_issue)
+            if isinstance(g3_gate, dict):
+                comparison = g3_gate.get("promise_comparison")
+                if isinstance(comparison, dict):
+                    alignment = comparison.get("alignment")
+                    if alignment == "mismatched":
+                        g3_gate["delivery_supported"] = False
+                    elif alignment == "uncertain" and g3_gate.get("status") == "pass":
+                        g3_gate["status"] = "needs_review"
+                failures = []
+                if g3_gate.get("core_covered") is False:
+                    failures.append(("G3_CORE_POINT_OMITTED", "标题未覆盖视频核心观看承诺", "回到看点选择，改用核心主旨表达", "N07"))
+                if g3_gate.get("delivery_supported") is False:
+                    failures.append(("G3_NOT_DELIVERED", "视频未兑现标题的观看承诺", "调整表达为材料实际交付的内容", "N09"))
+                if failures and g3_gate.get("status") == "pass":
+                    review["gates"]["G3"] = {**g3_gate, "status": "revise"}
+                for code, fallback_reason, action, rollback in failures:
+                    issue = {"issue_id": f"{cid}-{code}", "primary_dimension": "G3", "issue_code": code, "severity": "high", "repairable": True, "problem_span": candidate.get("headline", ""), "evidence_ids": g3_gate.get("evidence_ids", []) or [], "rule_ids": g3_gate.get("rule_ids", []) or [], "reason": str(g3_gate.get("reason") or fallback_reason), "action": action, "rollback_to": rollback}
+                    if not any(i.get("issue_code") == code for i in review.get("issues", []) if isinstance(i, dict)):
+                        review.setdefault("issues", []).append(issue)
             decision = _decide_candidate(review, mechanical, schema_errors=validation_errors, business_policy=state.get("business_policy", {"status": "missing"}))
             if candidate.get("signal_review_reasons") and decision["status"] == "ready_for_human_review":
                 decision.update(status="needs_review", reason="SIGNAL_SEMANTICS_UNVERIFIED", repairable=False)
@@ -3146,12 +4174,12 @@ class Pipeline:
             "video": to_dict(video), "claims": to_dict(understanding.claims),
             "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions),
             "events": to_dict(understanding.events), "turns": to_dict(understanding.turns),
-            "structural_candidates": structures, "boundary": to_dict(boundary), "matched_rules": rule_bundle.as_context(),
+            "structural_candidates": structures, "boundary": to_dict(boundary), "matched_rule_ids": rule_bundle.rule_ids,
             "previous_thesis_contract": left, "independent_thesis_contract": right,
             "basis": "review",
             "basis_note": "以 independent_thesis_contract（复核侧独立读法）为主旨基准重新选看点；若上一版看点漏掉了该读法认为不可删的要素，必须选出承载它的看点。",
             "review_issues": [],
-        }, "HighlightSet")
+        }, "HighlightSet", rules=state.get("rules"))
         contract2, errors2 = normalize_thesis_contract(retry_raw, understanding, boundary)
         highlights2 = _normalize_highlights(retry_raw, {d.claim_id for d in allowed}, [])
         errors2 += validate_highlight_alignment(highlights2, contract2)
@@ -3335,18 +4363,9 @@ class Pipeline:
         return route
 
     def _repair_mechanical_pass(self, task_id: str, state: dict[str, Any], video: Any, understanding: Understanding, boundary: BoundarySet, highlights: list[Highlight], candidates: dict[str, Any], round_no: int) -> dict[str, Any]:
-        """纯机械缺陷的定向修复：独立预算，不受「已有候选合格就交付」影响。
-
-        真实故障（2026-11-01 三条 canary）：五条候选只因超 1–2 个字被判 repairable，
-        但 `_route_candidates` 见到任意一条 ready 就直接 handoff，`max_rewrite_rounds`
-        一次都没用上——超字数的候选被判了「可修」然后原样丢弃。反过来资讯那条
-        一条都不合格，语义重写用满 2 轮也修不动缺归属的问题。
-
-        两件事分开：这里只修「压一下就好」的缺陷，按候选独立计数、压不动就停，
-        不占用也没有抢占 max_rewrite_rounds 的语义重写预算。
-        """
-        limit = int(getattr(self.config, "max_mechanical_repairs", 0) or 0)
-        if limit <= 0:
+        """先修可安全压缩的候选；每个后代沿父链共享最多两轮。"""
+        limit = min(2, max(0, int(getattr(self.config, "max_rewrite_rounds", 2))))
+        if not getattr(self.config, "max_mechanical_repairs", 0) or not limit:
             return candidates
         reviews = {r.get("candidate_id"): r for r in candidates.get("reviews", [])}
         targets = []
@@ -3354,39 +4373,95 @@ class Pipeline:
             source = next((c for c in candidates.get("candidates", []) if c.get("candidate_id") == decision.get("candidate_id")), None)
             if source is None:
                 continue
-            defects = _compressible_defects(source, decision, reviews.get(decision.get("candidate_id")))
+            defects = (_compressible_defects(source, decision, reviews.get(decision.get("candidate_id")))
+                       or _pending_length_semantic_defects(source, decision))
             if defects:
                 targets.append((source, defects))
         if not targets:
             return candidates
         state["mechanical_repair_targets"] = [c["candidate_id"] for c, _ in targets]
         repaired: list[str] = []
-        for source, defects in targets:
-            for attempt in range(1, limit + 1):
-                before = {c.get("candidate_id"): str(c.get("rendered_title") or "") for c in candidates["candidates"]}
-                # 每轮换一个 candidate_id 后缀空间，避免与既有候选撞 id；用负 round 段位与语义重写区分开。
-                rewritten = self._generate_and_review(task_id, state, video, understanding, boundary, highlights, -(round_no + attempt), source, repair_mode="压缩")
-                if not rewritten.get("candidates"):
-                    break
-                candidates["candidates"] += rewritten["candidates"]
-                candidates["reviews"] += rewritten["reviews"]
-                candidates["decisions"] += rewritten["decisions"]
-                # 这一版的 id 会进重写命名前缀，锚到 parent 上便于界面显示「上一版」。
-                fixed = [c for c in rewritten["candidates"] if str(c.get("rendered_title") or "") != before.get(source["candidate_id"])]
+        original_route = candidates["route"]
+        queue = sorted(targets, key=lambda item: not any(e.get("code") == "G4_LENGTH_EXCEEDED" for e in item[1]))
+        attempted = {e.get("parent") for e in state.get("mechanical_repair_attempts", [])}
+        while queue:
+            source, defects = queue.pop(0)
+            if source.get("candidate_id") in attempted:
+                continue
+            depth = _rewrite_depth(source, candidates["candidates"])
+            if depth >= limit:
+                continue
+            parent_decision = next(d for d in candidates["decisions"] if d.get("candidate_id") == source.get("candidate_id"))
+            attempt = depth + 1
+            state.setdefault("mechanical_repair_attempts", []).append({"parent": source["candidate_id"], "round": attempt})
+            attempted.add(source["candidate_id"])
+            state["reviews"] = candidates.get("reviews", [])
+            rewritten = self._generate_and_review(task_id, state, video, understanding, boundary, highlights, -attempt, source, repair_mode="压缩", known_candidates=candidates["candidates"])
+            # 去重没有产生后代时，消费一次预算并仅允许同一来源再试一轮。
+            if (not rewritten.get("candidates") and
+                    (rewritten.get("route") or {}).get("reason") == "REWRITE_NO_NEW_TITLE" and
+                    not (rewritten.get("route") or {}).get("pending_signal_ids") and attempt < limit):
                 self.storage.event(task_id, "N09", "mechanical_repair", {
                     "parent": source["candidate_id"], "attempt": attempt, "mode": "压缩",
-                    "defects": [e.get("code") for e in defects],
-                    "parent_title": before.get(source["candidate_id"]),
-                    "repaired_titles": [c.get("rendered_title") for c in rewritten["candidates"]],
-                    "repaired_ids": [c.get("candidate_id") for c in rewritten["candidates"]],
-                    "new_titles": len(fixed),
+                    "defects": [e.get("code") for e in defects], "parent_title": source.get("rendered_title"),
+                    "repaired_titles": [], "repaired_ids": [], "reason": "REWRITE_NO_NEW_TITLE",
                 })
-                if fixed:
-                    repaired += [c.get("candidate_id") for c in fixed]
-                    break
-        if not repaired and not state.get("mechanical_repair_targets"):
-            return candidates
-        candidates["route"] = self._route_candidates(candidates["decisions"], state.get("rewrite_round", 0))
+                attempt += 1
+                state["mechanical_repair_attempts"].append({"parent": source["candidate_id"], "round": attempt})
+                rewritten = self._generate_and_review(task_id, state, video, understanding, boundary, highlights, -attempt, source, repair_mode="压缩", known_candidates=candidates["candidates"])
+            for child in rewritten.get("candidates", []):
+                child["rewrite_budget_depth"] = max(attempt, child.get("rewrite_budget_depth", 0))
+            # 原本待核的事实或政策不能因为改写后的复评通过而消失。
+            # 但「限定语义待核」是按旧表达判的：重写后用另一种方式把限定说清了，
+            # 子候选 G1 已经 pass，再压回待核就是把父的问题复制给已经解决的标题
+            # （实测白菜 cand-2-r-1-1：G1/G2/G3/G4 全 pass、质量分 8、issues 为空，
+            # 仍被标 needs_review，人工判为可用）。事实类待核仍照旧继承。
+            parent_g1 = (parent_decision.get("gates") or {}).get("G1") or {}
+            parent_limit_only = bool(parent_g1.get("limit_pending"))
+            if parent_decision.get("status") == "needs_review":
+                for decision in rewritten.get("decisions", []):
+                    if decision.get("status") == "reject":
+                        continue
+                    child_g1 = str(((decision.get("gates") or {}).get("G1") or {}).get("status") or "")
+                    if parent_limit_only and child_g1 == "pass":
+                        decision["parent_review_carried"] = False
+                        continue
+                    decision["status"] = "needs_review"
+                    decision["reason"] = parent_decision.get("reason", "PARENT_REQUIRES_REVIEW")
+                    decision["repairable"] = False
+            candidates["candidates"] += rewritten.get("candidates", [])
+            candidates["reviews"] += rewritten.get("reviews", [])
+            candidates["decisions"] += rewritten.get("decisions", [])
+            repaired += [c.get("candidate_id") for c in rewritten.get("candidates", [])]
+            self.storage.event(task_id, "N09", "mechanical_repair", {
+                "parent": source["candidate_id"], "attempt": attempt, "mode": "压缩",
+                "defects": [e.get("code") for e in defects], "parent_title": source.get("rendered_title"),
+                "repaired_titles": [c.get("rendered_title") for c in rewritten.get("candidates", [])],
+                "repaired_ids": [c.get("candidate_id") for c in rewritten.get("candidates", [])],
+            })
+            child_reviews = {r.get("candidate_id"): r for r in rewritten.get("reviews", [])}
+            for child in rewritten.get("candidates", []):
+                decision = next((d for d in rewritten.get("decisions", []) if d.get("candidate_id") == child.get("candidate_id")), {})
+                remaining = (_compressible_defects(child, decision, child_reviews.get(child.get("candidate_id")))
+                             or _pending_length_semantic_defects(child, decision))
+                if remaining:
+                    queue.append((child, remaining))
+            subroute = rewritten.get("route") or {}
+            if (subroute.get("action") == "reject" or subroute.get("pending_signal_ids") or
+                    (subroute.get("action") == "needs_review" and subroute.get("reason") != "core_fact_or_business_policy_requires_human_verification")):
+                pending = sorted(set((original_route.get("pending_signal_ids") or []) + (subroute.get("pending_signal_ids") or [])))
+                reasons = [str(r) for r in (original_route.get("reason"), subroute.get("reason")) if r]
+                original_route = {**subroute, "action": "needs_review", "recommended_candidate_id": None,
+                                  "eligible_candidate_ids": [], "pending_signal_ids": pending,
+                                  "reason": "；".join(dict.fromkeys(reasons))}
+        if original_route.get("action") in {"needs_review", "reject"} or original_route.get("pending_signal_ids"):
+            candidates["route"] = original_route
+        else:
+            attempted = {e["parent"] for e in state.get("mechanical_repair_attempts", [])}
+            routable = [d for d in candidates["decisions"] if d.get("status") != "rewrite" or (
+                d.get("candidate_id") not in attempted and
+                _rewrite_depth(next(c for c in candidates["candidates"] if c.get("candidate_id") == d.get("candidate_id")), candidates["candidates"]) < limit)]
+            candidates["route"] = self._route_candidates(routable, state.get("rewrite_round", 0))
         self.storage.event(task_id, "Q01", "quality_route_after_mechanical_repair", {
             "action": candidates["route"].get("action"), "reason": candidates["route"].get("reason"),
             "targets": state["mechanical_repair_targets"], "repaired": repaired,
@@ -3418,22 +4493,104 @@ class Pipeline:
                     "reason": "repairable_gate_or_quality_issues", "rewrite_round": rewrite_round}
         return {"action": "reject" if rejected else "stop", "recommended_candidate_id": None, "eligible_candidate_ids": [], "rewrite_candidate_id": None, "reason": "no_eligible_or_repairable_candidate", "rewrite_round": rewrite_round}
 
+    def _compress_request_payload(self, *, video: Any, understanding: Understanding, boundary: BoundarySet,
+                                  source: dict[str, Any], parent_review: dict[str, Any], required: list[str],
+                                  budget: int, identity: dict[str, Any], rewrite_round: int) -> dict[str, Any]:
+        """超长修复的小载荷：只回答「这句话该删哪几个字」。
+
+        压缩原先走完整重写载荷（42–63K 字符：video 全量 + claims + boundary + 规则），
+        但这一步的边际信息只有「父标题、预算、哪些字不能删」。全库 549 条候选里
+        G4_LENGTH_EXCEEDED 出现 103 次（19%），每次都要为「少两个字」重付一遍全部
+        材料。评审仍然读全量材料，所以压缩改义会在下游被抓出来。
+        """
+        claim_by_id = {claim.claim_id: claim for claim in understanding.claims}
+        decision_by_id = {decision.claim_id: decision for decision in boundary.decisions}
+        required_claims = []
+        for claim_id in source.get("claim_ids") or []:
+            claim = claim_by_id.get(str(claim_id))
+            if claim is None:
+                continue
+            item: dict[str, Any] = {"claim_id": claim.claim_id, "text": claim.text}
+            decision = decision_by_id.get(str(claim_id))
+            if decision is not None:
+                if decision.required_source_phrase:
+                    item["required_source_phrase"] = decision.required_source_phrase
+                if decision.attribution_required:
+                    item["attribution_required"] = True
+                if decision.required_limits:
+                    item["required_limits"] = list(decision.required_limits)
+            required_claims.append(item)
+        head_body = str(source.get("headline") or "")
+        rendered = str(source.get("rendered_title") or render_title(source))
+        # REWRITE_PROMPT 的压缩段落直接引用 length_repair（模型自己估字数系统性偏低，
+        # 必须把「超了几个字、预算多少」算好给它）；小载荷换掉了整份 user，
+        # 这个字段不带上就等于让模型盲压。
+        length_repair = {
+            "over_by": max(0, len(rendered) - self.config.max_chars),
+            "current_body_chars": len(head_body),
+            "max_chars": self.config.max_chars,
+            "max_chars_body": budget,
+            "parent_rendered_length": len(rendered),
+            "defects": [{"code": e.get("code"), "reason": e.get("reason")} for e in ((source.get("mechanical_checks") or {}).get("errors") or []) if isinstance(e, dict)],
+            "instruction": "优先满足长度；不得虚构或丢失必要归属和限定。未决事实仍需核实，不得视为已确认。",
+        }
+        payload: dict[str, Any] = {
+            "task": "compress_only",
+            "video": {"title": video.title, "author": video.author, "format": video.format, "domain": video.domain},
+            "parent_candidate": {
+                "candidate_id": source.get("candidate_id"),
+                "rendered_title": str(source.get("rendered_title") or render_title(source)),
+                "headline": source.get("headline"),
+                "prefix_labels": list(source.get("prefix_labels") or []),
+                "slot_id": source.get("slot_id"), "thesis_id": source.get("thesis_id"),
+                "highlight_id": source.get("highlight_id"),
+            },
+            "defects": [{"code": e.get("code"), "reason": e.get("reason")} for e in ((source.get("mechanical_checks") or {}).get("errors") or []) if isinstance(e, dict)],
+            "length_repair": length_repair,
+            "review_issues": [{"issue_code": i.get("issue_code"), "action": i.get("action")} for i in (parent_review.get("issues") or []) if isinstance(i, dict)],
+            "required_claims": required_claims,
+            "display_config": {"max_chars": self.config.max_chars, "max_chars_body": budget, "prefix_labels": required,
+                               "prefix_rendered": render_labels(required), "identity": identity,
+                               "counting": "前缀与正文合计不超过 max_chars"},
+            "rewrite_mode": "压缩",
+            "target_count": 1,
+            "rewrite_round": rewrite_round,
+            "instruction": ("只做文字压缩：把 parent_candidate 压到 display_config.max_chars_body 以内，"
+                            "不得改事实、归属、限定、否定或范围。只返回 1 条 candidates，每条只写 headline 与 change_reason；"
+                            "claim_ids/evidence_ids/highlight_id/slot_id/thesis_id/prefix_labels 由系统继承父候选，"
+                            "不要输出也不要改。"),
+        }
+        attack_hits = find_personal_attacks(rendered or head_body)
+        if attack_hits:
+            # 与完整重写载荷同一契约：P9 命中词必须随请求带走，压字数不能把攻击词原样保留。
+            payload["forbidden_terms"] = {"rule_id": "P9", "terms": attack_hits, "instruction": attack_rewrite_hint(attack_hits)}
+        return payload
+
     def _generate_and_review(self, task_id: str, state: dict[str, Any], video: Any, understanding: Understanding, boundary: BoundarySet, highlights: list[Highlight], rewrite_round: int, source: dict[str, Any] | None = None, repair_mode: str | None = None, skip_thesis_review: bool = False, thesis_basis: str | None = None, known_candidates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         signal_report = extract_risk_signals(video)
         state["risk_signals"] = signal_report
-        required = normalize_prefix_labels(required_prefixes(format=video.format, attributes=understanding.attributes), signal_report["required_prefixes"])
+        required = normalize_prefix_labels([], required_prefixes(format=video.format, attributes=understanding.attributes, domain=video.domain, evidence=video.evidence) + signal_report["required_prefixes"])
         budget = body_budget(self.config.max_chars, required)
         state["required_prefixes"] = required
         state["body_budget"] = budget
+        identity = route_identity(
+            author=video.author,
+            creator_known=None,
+            delivery_type=(state.get("thesis_contract") or {}).get("delivery_type", ""),
+            domain=video.domain,
+            category=str(((video.provenance or {}).get("metadata") or {}).get("category") or ""),
+            public_figures=self.config.extra.get("public_figures"),
+        )
+        state["identity_route"] = identity
         # 暂缓核验的陈述不产生「来源/限定」要求：它本来就不该被写进标题
-        source_requirements = [to_dict(decision) for decision in boundary.decisions if decision.decision != "excluded" and not decision.verification_required and (decision.attribution_required or decision.required_source_phrase or decision.required_limits or decision.forbidden_inferences)]
+        source_requirements = [to_dict(decision) for decision in boundary.decisions if decision.decision != "excluded" and not decision.verification_required and (decision.attribution_required or decision.required_source_phrase or decision.required_limits or decision.conditional_constraints or decision.forbidden_inferences)]
         blocked_claims = [
             {"claim_id": decision.claim_id, "forbidden_inferences": decision.forbidden_inferences,
              "reason": "暂缓核验" if decision.verification_required else "已排除", "unresolved": decision.verification_required}
             for decision in boundary.decisions
             if decision.decision == "excluded" or decision.verification_required
         ]
-        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "thesis_contract": state.get("thesis_contract", {}),  "matched_rules": state.get("rules", {}), "input_quality": state.get("input_quality", {}), "source_evidence_usage": state.get("source_evidence_usage", {}), "display_config": {"max_chars": self.config.max_chars, "max_chars_body": budget, "prefix_labels": required, "prefix_rendered": render_labels(required), "counting": "前缀与正文合计不超过 max_chars", "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
+        user = {"video": to_dict(video), "claims": to_dict(understanding.claims), "semantic_units": to_dict(understanding.semantic_units), "unit_decisions": to_dict(boundary.unit_decisions), "boundary": to_dict(boundary), "source_requirements": source_requirements, "blocked_claims": blocked_claims, "unresolved_issues": boundary.unresolved_issues, "highlights": to_dict(highlights), "thesis_contract": state.get("thesis_contract", {}), "matched_rule_ids": (state.get("rules") or {}).get("rule_ids", []), "input_quality": state.get("input_quality", {}), "source_evidence_usage": state.get("source_evidence_usage", {}), "display_config": {"max_chars": self.config.max_chars, "max_chars_body": budget, "prefix_labels": required, "prefix_rendered": render_labels(required), "identity": identity, "counting": "前缀与正文合计不超过 max_chars", "ending_question_mark_forbidden": True}, "strategy_enum": rubric().get("title_policy", {}).get("strategy_enum", []), "strategy_triggers": rubric().get("title_policy", {}).get("strategy_triggers", {}), "target_count": self.config.rewrite_candidate_count if source else self.config.target_count, "rewrite_round": rewrite_round}
         user["risk_signals"] = signal_report
         if thesis_basis:
             # 两套解读分歧后按其中一侧重出：契约里的承诺/必保语义换成该侧原文，
@@ -3472,9 +4629,24 @@ class Pipeline:
                     "max_chars_body": budget,
                     "parent_rendered_length": len(str(source.get("rendered_title") or "")),
                     "defects": [{"code": e.get("code"), "reason": e.get("reason")} for e in ((source.get("mechanical_checks") or {}).get("errors") or []) if isinstance(e, dict)],
+                    "instruction": "优先满足长度，同时根据 review_issues 修复语义缺陷；不得虚构或丢失必要归属和限定。未决事实仍需核实，不得视为已确认。",
                 }
+        # 纯文字压缩不需要全量材料：切到小载荷，并在事件里留下体积对比，
+        # 这样"压缩到底省了多少"是查得到的，不靠事后推断。
+        if source and rewrite_mode == "压缩":
+            full_payload_chars = len(json.dumps(user, ensure_ascii=False))
+            user = self._compress_request_payload(
+                video=video, understanding=understanding, boundary=boundary, source=source,
+                parent_review=parent_review, required=required, budget=budget,
+                identity=identity, rewrite_round=rewrite_round,
+            )
+            self.storage.event(task_id, "N09", "compress_small_request", {
+                "parent": source.get("candidate_id"),
+                "full_payload_chars": full_payload_chars,
+                "compress_payload_chars": len(json.dumps(user, ensure_ascii=False)),
+            })
         memory_calls = int(state.get("memory_calls", 0))
-        if memory_calls < self.config.memory_call_limit:
+        if rewrite_mode != "压缩" and memory_calls < self.config.memory_call_limit:
             memory_query = parent_review.get("memory_query") or {}
             query = str(memory_query.get("query") or " ".join(i.get("issue_code", "") for i in parent_review.get("issues", []))) if source else video.title
             problem_types = [str(x) for x in memory_query.get("problem_types", [])] if source else ["表达", "事实与信源"]
@@ -3491,7 +4663,9 @@ class Pipeline:
                 user["same_video_cases"] = same_video
                 state.setdefault("memory_trace", []).append({"query": video.video_id, "status": "same_video", "used_case_ids": [c.get("case_id") for c in same_video]})
         generation_task = "rewrite" if source else "generate"
-        draft = self._call(task_id, "N09", generation_task, user, "AgentDraft")
+        draft = self._call(task_id, "N09", generation_task, user, "AgentDraft", rules=state.get("rules"))
+        if source and rewrite_mode == "压缩":
+            draft = _fill_compress_draft(draft, source)
         state["prompt_hashes"][generation_task] = self._last_prompt_hash(task_id, "N09", generation_task)
         candidates = _normalize_candidates(draft, rewrite_round, source["candidate_id"] if source else None, required_prefixes=required)
         if thesis_basis:
@@ -3541,16 +4715,12 @@ class Pipeline:
                 candidate.setdefault("generation_schema_errors", []).append(f"duplicate candidate_id: {cid}")
             seen_candidate_ids.add(cid)
         allowed_claims = {d.claim_id for d in boundary.decisions if d.decision != "excluded" and not d.verification_required}; allowed_highlights = {h.highlight_id for h in highlights}
-        # 「边界未输出 unit_decisions」与「所有单元均被明确排除」不能混为一谈：后者是闭合的排除结果，
-        # 不得因集合为空就把全部单元复活。只有边界确实没给 unit_decisions 时才沿用旧行为。
-        if boundary.unit_decisions:
-            # 只有被明确判 excluded 的单元不可写。边界「没提到」的单元是没表态，不是不在范围——
-            # 真实故障：边界只给了 u6 excluded，这里被算成「只剩空集」，于是所有候选的
-            # unit_id=u1 都被判 G4_INVALID_REFERENCE，整条视频零交付。
-            excluded_units = {d.unit_id for d in boundary.unit_decisions if d.decision == "excluded"}
-            allowed_units = {u.unit_id for u in understanding.semantic_units if u.unit_id not in excluded_units}
-        else:
-            allowed_units = {u.unit_id for u in understanding.semantic_units}
+        # 允许集合统一走 _allowed_unit_ids：只有被明确判 excluded 的单元不可写，边界「没提到」
+        # 的单元是没表态、不是不在范围（真实故障：边界只给 u6 excluded 时曾把其余单元算成
+        # 空集，所有候选的 unit_id=u1 全被判 G4_INVALID_REFERENCE，整条视频零交付）。
+        # 结构片段（turn-N/axis-N）与语义单元（su-N）命名不同，但只要它被抽帧或边界点到，
+        # 就属于本任务范围，不能因为名字不在 semantic_units 里就判候选越界。
+        allowed_units = _allowed_unit_ids(understanding, boundary, highlights)
         boundary_by_claim = {d.claim_id: d for d in boundary.decisions}
         # 候选未自带 unit_id 时，从其 highlight 反查所属语义单元补齐（仅用于定位/归因，不参与事实校验）
         unit_by_highlight = {h.highlight_id: h.unit_id for h in highlights if h.unit_id}
@@ -3566,10 +4736,10 @@ class Pipeline:
             c["signal_review_reasons"] = signal_review_reasons(c.get("headline", ""), signal_report, cited_evidence)
             numeric_support = [e.text for e in video.evidence if e.evidence_id in cited_evidence and e.field != "frame" and e.quality not in {"model_derived_uncalibrated", "unverified_source_metadata"}]
             if unsupported_numeric_facts(c.get("headline", ""), numeric_support):
-                signal_errors.append({"code": "G4_NUMERIC_CONFLICT", "repairable": True, "reason": "标题数值、单位或指标没有对应引用证据支持；不得用原题数字白名单替代核验"})
+                signal_errors.append({"code": "G4_NUMERIC_CONFLICT", "repairable": True, "reason": "标题数值、单位或指标没有对应引用证据支持（金额须带原单位，如「400亿美元」不能写成「400亿」）；不得用原题数字白名单替代核验"})
             if c.get("slot_id") == "core_hook":
                 main_hl = next((h.highlight_id for h in highlights if getattr(h, "role", "") == "main"), None)
-                if main_hl and c.get("highlight_id") != main_hl:
+                if main_hl and not _core_hook_is_aligned(c, highlights, state.get("thesis_contract") or {}):
                     c["mechanical_checks"]["errors"].append({
                         "code": "G4_HOOK_OFF_MAINLINE", "repairable": True,
                         "reason": f"核心钩子必须绑定主看点 {main_hl}，不得换成其它片段（当前 {c.get('highlight_id')}）"})
@@ -3592,7 +4762,8 @@ class Pipeline:
             carrier_only = bool(required_phrases) and all(_carrier_only_source(x) for x in required_phrases)
             if _declares_narration(c.get("prefix_labels")) and carrier_only:
                 source_required = False
-            if source_required and not _has_explicit_source_relation(c.get("headline", "")):
+            if source_required and not _has_explicit_source_relation(c.get("headline", ""), required_phrases) \
+                    and not _attribution_identity_present(c.get("headline", ""), required_phrases):
                 c["programmatic_g1_flags"].append({"code": "G1_SOURCE_ATTRIBUTION_MISSING", "repairable": True, "reason": "本条边界明确要求来源归属，但标题未表达转述关系"})
         state["pending_review_candidates"] = candidates
         self.storage.save_candidates(task_id, candidates)
@@ -3621,7 +4792,7 @@ class Pipeline:
             state["thesis_consistency"] = declared
         state["prompt_hashes"]["review"] = self._last_prompt_hash(task_id, "R01", "review")
         reviews = _normalize_reviews(review_raw, [c["candidate_id"] for c in candidates])
-        reviews, decisions = self._validate_and_decide_reviews(video, state, candidates, reviews, checks)
+        reviews, decisions = self._validate_and_decide_reviews(video, state, candidates, reviews, checks, task_id)
         route = self._route_candidates(decisions, rewrite_round)
         route = self._guard_handoff(route, state, candidates)
         if source:

@@ -99,6 +99,22 @@ def validate_review(item: dict[str, Any], *, evidence_ids: set[str], rule_ids: s
             for ref in issue_rules:
                 if ref not in rule_ids:
                     errors.append(f"issue unknown rule_id: {ref}")
+    # 矛盾校验：gate 判 pass 却报了同维度 high/critical 问题，两者不能同时成立。
+    # 否则「主旨遗漏已识别」却因 gate=pass 被质量分抵消、无效放行。
+    if isinstance(gates, dict):
+        for gate_id in GATE_IDS:
+            gate_status = str((gates.get(gate_id) or {}).get("status") or "")
+            if gate_status != "pass":
+                continue
+            conflicting = [
+                i for i in (issues if isinstance(issues, list) else [])
+                if isinstance(i, dict)
+                and i.get("primary_dimension") == gate_id
+                and (i.get("severity") in {"high", "critical"} or i.get("issue_code") == "G3_CORE_POINT_OMITTED")
+            ]
+            if conflicting:
+                codes = ", ".join(str(i.get("issue_code") or "?") for i in conflicting)
+                errors.append(f"{gate_id} pass conflicts with high/critical issue(s): {codes}")
     guidance = item.get("rewrite_guidance")
     if not isinstance(guidance, dict) or any(not isinstance(guidance.get(k), list) for k in ("preserve", "modify", "forbidden")):
         errors.append("rewrite_guidance missing or invalid")

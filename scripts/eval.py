@@ -145,16 +145,19 @@ def cohens_kappa(pairs: list[tuple[str, str]]) -> float | None:
 
 
 def inter_rater(gold: list[dict[str, str]]) -> dict:
-    """按 (video_id, candidate_id) 聚合同一候选的多个判定人，算成对 kappa。"""
-    grouped: dict[tuple[str, str], dict[str, str]] = {}
+    """按 (video_id, task_id, candidate_id) 聚合同一候选的多个判定人，算成对 kappa。"""
+    # 键必须带任务身份：同一视频、同一局部候选 ID 在不同实验臂里是两道不同的题，
+    # 只按 (video, candidate) 聚合会把跨任务的两条判定当成同一个候选的双标注。
+    grouped: dict[tuple[str, str, str], dict[str, str]] = {}
     for row in gold:
         vid = col(row, "video_id")
         cid = col(row, "candidate_id")
+        tid = col(row, "task_id")
         reviewer = col(row, "判定人") or "未署名"
         verdict = col(row, "人工判定")
         if not vid or not cid or not verdict:
             continue
-        grouped.setdefault((vid, cid), {})[reviewer] = verdict
+        grouped.setdefault((vid, tid, cid), {})[reviewer] = verdict
     multi = {k: v for k, v in grouped.items() if len(v) >= 2}
     pairs: list[tuple[str, str]] = []
     for verdicts in multi.values():
@@ -185,6 +188,7 @@ def main() -> int:
     ap.add_argument("--db", action="append", help="可多次；缺省扫 runtime/**/agent.db")
     ap.add_argument("--max-chars", type=int, default=20)
     ap.add_argument("--out", default=str(ROOT / "runtime" / "eval_report.md"))
+    ap.add_argument("--manifest", default="", help="固定视频分母：给了就用该清单全集计失败，不缩分母")
     args = ap.parse_args()
 
     gold_path = Path(args.gold)
@@ -196,10 +200,14 @@ def main() -> int:
         print("有效样本 0 条：gold.csv 里还没有填「人工判定」的行。先判 15 条再跑。")
         return 0
 
+    scoped = bool(args.db)
     dbs = args.db or sorted(glob.glob(str(ROOT / "runtime" / "**" / "agent.db"), recursive=True))
     tasks = index_tasks(dbs)
+    if not scoped:
+        print("⚠️ 未指定 --db：本次扫描 runtime 下全部历史任务库，结果混用多个版本，"
+              "不能作为验收结论。正式验收请显式传批次任务库。\n")
 
-    rows, missing, ambiguous = [], [], []
+    rows, missing, ambiguous, identity_errors = [], [], [], []
     for g in gold:
         vid = (g.get("video_id") or "").strip()
         if not vid:
@@ -212,12 +220,21 @@ def main() -> int:
                 missing.append(vid)
             continue
         state = task["state"]
-        candidates = state.get("candidates") or []
+        # 技术失败/停机的任务，候选可能停在 N09 检查点的 pending_review_candidates 里；
+        # 只查 candidates 会把真实存在的标签误判成身份不一致（本批 3 条）。
+        candidates = (state.get("candidates") or []) + (state.get("pending_review_candidates") or [])
         by_id = {str(c.get("candidate_id")): c for c in candidates}
         chosen = (g.get("candidate_id") or "").strip()
+        # 金标写的候选必须真的存在于它指定的任务里：跨任务同 ID 或旧任务标签
+        # 会让"技术失败的任务"被另一条任务的标签救回来，必须当错配拒绝，不能静默计分。
+        if chosen and chosen not in by_id:
+            identity_errors.append(f"{vid} / {task['task_id']} / {chosen}: 金标候选不在该任务候选中")
+            continue
         verdict = col(g, "人工判定")
         criteria = [x.strip() for x in col(g, "命中的判据ID").split(";") if x.strip()]
-        rec = (state.get("route") or {}).get("recommended_candidate_id")
+        # 人工驳回会改写 route.eligible/recommended 的可用范围；系统原推荐必须用不可变快照，
+        # 否则"推荐准确率"变成用人工改过的结果证明系统自己。
+        rec = (state.get("original_system_route") or state.get("route") or {}).get("recommended_candidate_id")
         rec_titles = [c.get("headline", "") for c in candidates]
         rows.append({
             "video_id": vid, "task_id": task["task_id"], "status": task["status"],
@@ -225,23 +242,33 @@ def main() -> int:
             "candidate_id": chosen, "verdict": verdict, "criteria": criteria,
             "system_recommended": rec, "chosen_headline": (by_id.get(chosen) or {}).get("headline", ""),
             "g1_status": review_gates(state, chosen).get("G1", ""),
-            "title_lengths": [len(str(c.get("rendered_title") or c.get("headline") or "")) for c in candidates if (c.get("rendered_title") or c.get("headline"))],
+            # 长度只统计本次被人工评价的那一条；把整任务候选重复计入会虚增样本量并低估超长率
+            "title_lengths": [len(str(c.get("rendered_title") or c.get("headline") or "")) for c in ([by_id.get(chosen)] if chosen in by_id else []) if (c.get("rendered_title") or c.get("headline"))],
         })
 
     # 一次通过率：同一条视频至少 1 个候选被判「可用」
     by_video: dict[str, list[dict]] = {}
     for r in rows:
         by_video.setdefault(r["video_id"], []).append(r)
+    # 预注册分母：给了 manifest 就用固定视频全集，未产出/未评的样本留在分母里计失败，
+    # 不允许"没有标题的视频悄悄从分母消失"。
+    if args.manifest:
+        manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+        for sample in manifest.get("samples", []):
+            vid = str(sample.get("video_id") or "")
+            if vid:
+                by_video.setdefault(vid, [])
     # 严格通过只数「可用」；含灰度过率把「勉强通过」也算上。
     # 两档分开报：合并会让"把不可用改成勉强通过"看起来像质量提升。
-    pass_videos = [v for v, rs in by_video.items() if any(r["verdict"] in USABLE_VERDICTS for r in rs)]
-    pass_rate = len(pass_videos) / len(by_video) if by_video else 0.0
+    strict_videos = [v for v, rs in by_video.items() if any(r["verdict"] == "可用" for r in rs)]
+    pass_rate = len(strict_videos) / len(by_video) if by_video else 0.0
     loose_videos = [v for v, rs in by_video.items() if any(r["verdict"] in {"可用", "勉强通过"} for r in rs)]
     loose_rate = len(loose_videos) / len(by_video) if by_video else 0.0
 
     # 人工一致率：系统推荐的那条，是否被判可用
-    judged = [r for r in rows if r["system_recommended"] and r["candidate_id"]]
-    agree = [r for r in judged if r["candidate_id"] == r["system_recommended"] and r["verdict"] in USABLE_VERDICTS]
+    # 分母是「被评价的系统推荐」本身，不是有推荐任务下的全部人工标签
+    judged = [r for r in rows if r["system_recommended"] and r["candidate_id"] == r["system_recommended"]]
+    agree = [r for r in judged if r["verdict"] in USABLE_VERDICTS]
     agree_rate = len(agree) / len(judged) if judged else None
 
     # 长度合格率：被评估候选里 ≤ max_chars 的比例
@@ -351,6 +378,15 @@ def main() -> int:
                 head = ((t["state"].get("candidates") or [{}])[0].get("headline") or "")[:28]
                 lines.append(f"| `{t['task_id']}` | {t.get('provider', '?')} | {t.get('rule_version', '?')} | {t['status']} | {head} |")
             lines.append("")
+    if identity_errors:
+        lines += [
+            "## ⚠️ 这些标签被拒绝：候选与任务身份不一致",
+            "",
+            "按 task_id + candidate_id 核对后对不上，已排除而不是计入成功。先修标签来源再重跑。",
+            "",
+        ]
+        lines += [f"- {item}" for item in identity_errors]
+        lines.append("")
     if missing:
         lines.append(f"⚠️ 以下视频在本机任务库里找不到可用任务：{', '.join(missing)}")
     if not judged:

@@ -6,11 +6,30 @@ docs/_ref/
 node_modules/
 node_modules.orig/
 .secrets.env
+.secret.env
+*.secret.env
 .secrets/
 config.review-batch.json
 # 本地验证用的临时配置（只差 output_dir，不随仓库走）
 config.verify_new*.json
+config.mock-smoke.json
+config.smoke*.json
+config.canary*.json
+# 浏览器预览工具的规则缓存，不是项目内容
+.browser-preview/
 .pytest_cache/
+# 文档清理归档区（可随时整目录删除）
+.trash/
+.tmp/
 .env
 .env.*
 !.env.example
+# 批次实验配置（与 smoke/verify/canary 同性质，不入库）
+config.siliconflow*.json
+config.juflow*.json
+config.deepseek-300.json
+config.memory-ab-*.json
+config.cost_ab_*.json
+config.ollama.json
+config.review-batch.json
+config.verify_*.json

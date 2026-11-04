@@ -1,0 +1,49 @@
+{
+  "version": "fix-verify-v1",
+  "sample_size": 6,
+  "note": "验证语法/用词/主语/边角料/剧情前缀 修复效果",
+  "samples": [
+    {
+      "video_id": "BV1Smxv67EVR",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "现场记录"
+    },
+    {
+      "video_id": "BV1Skxv6DEyq",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示"
+    },
+    {
+      "video_id": "BV1rcxi6BENc",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验"
+    },
+    {
+      "video_id": "BV1Y9xa62E9C",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示"
+    },
+    {
+      "video_id": "BV1QBxc6xEmL",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "剧情短片"
+    },
+    {
+      "video_id": "BV19ixc6oEaM",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验"
+    }
+  ]
+}

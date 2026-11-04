@@ -1,3 +1,4 @@
+import io
 import json
 import unittest
 from types import SimpleNamespace
@@ -5,7 +6,7 @@ from types import SimpleNamespace
 from agent_system.config import RunConfig
 from agent_system.types import Claim, VerificationResult
 from agent_system.verification.judge import compute_risk, parse_verification
-from agent_system.verification.router import is_verifiable, pick_core_claims, whitelist_for
+from agent_system.verification.router import build_verification_query, is_verifiable, pick_core_claims, whitelist_for
 from agent_system.verification.search import WsaSearchProvider, create_search_provider
 
 
@@ -86,6 +87,32 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(result.verdict, "unverifiable")
         self.assertEqual(result.confidence, 0.0)
 
+    def test_query_prefers_explicit_model_field(self):
+        claim = Claim("c1", "绿字标题压屏，镜头跟随一名男子走过走廊", "observable", [], verification_query="挪威首相驳斥FT通话报道")
+        self.assertEqual(build_verification_query(claim), "挪威首相驳斥FT通话报道")
+
+    def test_query_extracts_assertion_from_visual_description(self):
+        claim = Claim(
+            "c1",
+            "绿字标题压屏“挪威首相驳斥FT有关普京通话报道”；随后首相斯特勒系红领带在绿墙前抬手讲解，底部白色字幕条滚动",
+            "observable",
+            [],
+        )
+        query = build_verification_query(claim)
+        self.assertIn("挪威首相驳斥", query)
+        for noise in ("绿字", "压屏", "红领带", "字幕条", "镜头"):
+            self.assertNotIn(noise, query)
+        self.assertLessEqual(len(query), 40)
+
+    def test_query_falls_back_to_truncated_text_when_all_segments_are_visual(self):
+        claim = Claim("c1", "镜头推进，画面底部白色字幕条滚动，台标在右上角", "observable", [])
+        query = build_verification_query(claim)
+        self.assertTrue(query)
+        self.assertLessEqual(len(query), 40)
+
+    def test_query_is_empty_for_empty_text(self):
+        self.assertEqual(build_verification_query(Claim("c1", "   ", "observable", [])), "")
+
     def test_refuted_risk_requires_distinct_sources_and_confidence_threshold(self):
         claim = Claim("c1", "断言", "observable", [])
         claim.verification = VerificationResult("c1", "refuted", ["https://a", "https://a"], 0.99)
@@ -97,6 +124,97 @@ class VerificationTests(unittest.TestCase):
         result = compute_risk([claim], 2, 0.8)
         self.assertEqual(result["level"], "high")
         self.assertEqual(result["refuted_claim_ids"], ["c1"])
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, _limit: int | None = None) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+class WsaTransportRetryTests(unittest.TestCase):
+    """瞬时网络故障要重试，且失败必须标成可重试。
+
+    真实故障（2026-11-01）：本机 TUN 代理下同一域名连续握手约一半概率拿到
+    SSL UNEXPECTED_EOF。旧实现一次失败就抛 `RuntimeError`（没有 retryable 属性），
+    上层 `getattr(exc, "retryable", False)` 得到 False，于是把这条任务判成
+    不可重试技术失败，`batch` 还会因此中断整批。核查是可选增强能力，
+    不该被一次网络抖动打死。
+    """
+
+    def _run(self, side_effects, headers=None):
+        from unittest.mock import patch
+        from agent_system.verification import search as search_module
+        calls = []
+
+        def fake_urlopen(request, timeout=None):
+            calls.append(request)
+            effect = side_effects[min(len(calls) - 1, len(side_effects) - 1)]
+            if isinstance(effect, Exception):
+                raise effect
+            return _FakeResponse(effect)
+
+        with patch.object(search_module, "urlopen", fake_urlopen), \
+             patch.object(search_module.time, "sleep", lambda *_: None), \
+             patch.object(search_module.random, "uniform", lambda *_: 0.0):
+            try:
+                result = search_module.WsaSearchProvider._http_post_json(
+                    "https://wsa.tencentcloudapi.com/", headers or {}, {"q": 1}, 5.0)
+                return result, calls, None
+            except Exception as exc:  # noqa: BLE001 - 测试要断言异常属性
+                return None, calls, exc
+
+    def test_ssl_eof_is_retried_then_succeeds(self):
+        from ssl import SSLEOFError
+        payload = json.dumps({"Response": {"Pages": []}}).encode()
+        result, calls, error = self._run([SSLEOFError("EOF occurred in violation of protocol"), payload])
+        self.assertIsNone(error)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result, {"Response": {"Pages": []}})
+
+    def test_exhausted_retries_raise_retryable_model_error(self):
+        from urllib.error import URLError
+        from agent_system.model import ModelError
+        _, calls, error = self._run([URLError("connection reset")])
+        self.assertIsInstance(error, ModelError)
+        self.assertTrue(error.retryable)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("网络或代理链路不稳定", str(error))
+
+    def test_client_error_is_not_retried_and_not_marked_retryable(self):
+        from urllib.error import HTTPError
+        from agent_system.model import ModelError
+        error_body = io.BytesIO(b'{"Response":{"Error":{"Code":"AuthFailure"}}}')
+        _, calls, raised = self._run([HTTPError("https://wsa/", 403, "Forbidden", {}, error_body)])
+        self.assertIsInstance(raised, ModelError)
+        self.assertFalse(raised.retryable)
+        self.assertEqual(len(calls), 1, "凭据/请求错误不该重试")
+
+    def test_server_error_is_retried(self):
+        from urllib.error import HTTPError
+        from agent_system.model import ModelError
+        def make(code):
+            return HTTPError("https://wsa/", code, "boom", {}, io.BytesIO(b"upstream down"))
+        payload = json.dumps({"Response": {"Pages": []}}).encode()
+        result, calls, error = self._run([make(503), payload])
+        self.assertIsNone(error)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result, {"Response": {"Pages": []}})
+
+    def test_http_error_detail_never_contains_credentials(self):
+        from urllib.error import HTTPError
+        error, _, raised = self._run([HTTPError("https://wsa/", 401, "Unauthorized", {}, io.BytesIO(b"denied"))])
+        self.assertIsNone(error)
+        self.assertNotIn("secret", str(raised))
+        self.assertIn("WSA HTTP 401", str(raised))
 
 
 if __name__ == "__main__":

@@ -74,9 +74,14 @@ def upsert(entry: dict[str, str], path: Path | None = None) -> Path:
 
     key_video = next((k for k in header if k.startswith("video_id")), "video_id")
     key_cand = next((k for k in header if k.startswith("candidate_id")), "candidate_id")
+    key_task = next((k for k in header if k.startswith("task_id")), "task_id")
     replaced = False
     for existing in rows:
-        if existing.get(key_video) == entry.get("video_id") and existing.get(key_cand) == entry.get("candidate_id"):
+        # 身份必须是「任务 + 候选」：只按 video+candidate 覆盖会把另一个任务（含失败的
+        # 实验臂）的标签写成当前任务的结果，历史对照因此被污染过。
+        if (existing.get(key_video) == entry.get("video_id")
+                and existing.get(key_task, "") == entry.get("task_id", "")
+                and existing.get(key_cand) == entry.get("candidate_id")):
             for k in header:
                 existing[k] = value_of(k)
             replaced = True
@@ -92,7 +97,7 @@ def upsert(entry: dict[str, str], path: Path | None = None) -> Path:
     return target
 
 
-def remove(*, video_id: str, candidate_id: str, path: Path | None = None) -> Path:
+def remove(*, video_id: str, candidate_id: str, task_id: str = "", path: Path | None = None) -> Path:
     """撤回人工判定时移除对应金标准行，避免旧标签继续参与评估。"""
     target = path or GOLD
     if not target.exists():
@@ -103,9 +108,16 @@ def remove(*, video_id: str, candidate_id: str, path: Path | None = None) -> Pat
         rows = list(reader)
     key_video = next((k for k in header if k.startswith("video_id")), "video_id")
     key_cand = next((k for k in header if k.startswith("candidate_id")), "candidate_id")
-    # 若同一视频/候选存在多个任务，仅撤回与当前任务对应的金标准记录。
-    # 已有旧表可能只有 video/candidate 唯一行；该行也按当前键移除。
-    rows = [r for r in rows if not (r.get(key_video) == video_id and r.get(key_cand) == candidate_id)]
+    key_task = next((k for k in header if k.startswith("task_id")), "task_id")
+
+    def matched(row: dict[str, str]) -> bool:
+        if row.get(key_video) != video_id or row.get(key_cand) != candidate_id:
+            return False
+        # 传了 task_id 就必须同任务才撤回；没传时只撤回任务列为空的历史行，
+        # 不把别的实验臂的标签一起抹掉。
+        return row.get(key_task, "") == (task_id or "")
+
+    rows = [r for r in rows if not matched(r)]
     with target.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header, extrasaction="ignore")
         writer.writeheader()

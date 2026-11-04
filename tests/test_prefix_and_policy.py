@@ -98,12 +98,13 @@ class PrefixTests(unittest.TestCase):
         self.assertEqual(body_budget(20, ["剧情演绎"]), 14)
         self.assertEqual(body_budget(20, ["剧情演绎", "AI生成"]), 8)
 
-    def test_missing_required_prefix_is_not_repairable(self):
-        # 前缀是平台义务，不是表达选择：缺了不该靠"重写一版"糊过去
+    def test_missing_required_prefix_is_a_warning_not_a_block(self):
+        # 前缀在生成侧由 normalize_prefix_labels 无条件并进候选、渲染时由 render_labels 写进标题，
+        # 所以「缺前缀」在机械校验这层不可达：全库 23 个必填前缀任务 / 91 条候选 / 0 次命中。
+        # 只有绕过归一化手搓状态才会缺，此时留观测即可，不该阻断交付。
         result = _checks(_candidate(prefix_labels=[]), required=["剧情演绎"])
-        codes = {e["code"]: e["repairable"] for e in result["errors"]}
-        self.assertIn("G4_PREFIX_MISSING", codes)
-        self.assertFalse(codes["G4_PREFIX_MISSING"])
+        self.assertNotIn("G4_PREFIX_MISSING", {e["code"] for e in result["errors"]})
+        self.assertIn("G4_PREFIX_MISSING", {w["code"] for w in result["warnings"]})
 
     def test_prefix_budget_exhausted_is_a_business_decision(self):
         result = _checks(_candidate(headline="短标题"), max_chars=16, required=["剧情演绎", "AI生成"])
@@ -288,11 +289,15 @@ class RealModelShapeTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "G4_REPAIRABLE_WITH_INVALID_REVIEW")
 
     def test_schema_invalid_without_repairable_error_stays_human(self):
+        # 评审输出结构坏了、机械又没给出确定缺陷：只能报「评审不可用」，
+        # 不能把评审侧的故障算成标题的 G4 失败（人工判可用的案例里有 19 条因此被拦）。
         review = _review(g2_status="pass", g2_rules=[])
         mech = {"status": "fail", "errors": [{"code": "G4_PREFIX_MISSING", "repairable": False}]}
         decision = _decide_candidate(review, mech, schema_errors=["gates missing"], business_policy=_policy())
         self.assertEqual(decision["status"], "needs_review")
-        self.assertEqual(decision["reason"], "REVIEW_SCHEMA_INVALID")
+        self.assertEqual(decision["reason"], "REVIEW_UNAVAILABLE")
+        self.assertTrue(decision["review_unavailable"]["errors"])
+        self.assertNotIn("G4", decision["gates"])
 
 
 def _video_with(evidence_specs):
@@ -350,7 +355,8 @@ class PrimaryEvidenceGuardTests(unittest.TestCase):
         video = _video_with([("e-frame-000", "frame", "/tmp/f0.jpg", "raw_frame")])
         understanding = _understanding_with([("c1", "画面里有人在跑", ["e-frame-000"])])
         audit = _primary_evidence_audit(understanding, video)
-        self.assertFalse(audit["applicable"])
+        self.assertTrue(audit["applicable"])
+        self.assertIn("c1", audit["claims"])
 
     def test_guard_downgrades_claim_and_whole_unit(self):
         from agent_system.pipeline import _apply_primary_evidence_guard, _primary_evidence_audit
@@ -373,7 +379,8 @@ class PrimaryEvidenceGuardTests(unittest.TestCase):
         self.assertEqual(count, 1)
         by_id = {d.claim_id: d for d in guarded.decisions}
         self.assertEqual(by_id["c1"].decision, "excluded")
-        self.assertEqual(by_id["c1"].evidence_status, "unsupported")
+        self.assertEqual(by_id["c1"].evidence_status, "unknown")
+        self.assertTrue(by_id["c1"].verification_required)
         self.assertIn("C22", by_id["c1"].reason)
         self.assertEqual(by_id["c2"].decision, "usable")
         units = {u.unit_id: u for u in guarded.unit_decisions}
@@ -470,14 +477,14 @@ class StructuralCandidateTests(unittest.TestCase):
         u, b = self._build([SemanticUnit("su-1", "意思", ["c1", "c2"], ["e-title", "e-asr-0014"], role_in_video="主旨")],
                            [{"f": "ev-1", "t": "ev-2", "type": "contrast", "note": "她迟到反被关心"}])
         out = _structural_candidates(u, b)
-        self.assertTrue(any(x["kind"] == "turn" and x["relation"] == "contrast" for x in out))
+        self.assertFalse(any(x["kind"] == "turn" and x["relation"] == "contrast" for x in out))
 
     def test_main_axis_needs_two_events(self):
         from agent_system.pipeline import _structural_candidates
         from agent_system.types import SemanticUnit
-        # 覆盖两个事件的主旨 → 可作主轴
+        # 两个事件引用重合不证明事件含义或彼此关系，不能拼接成已验证主轴。
         u, b = self._build([SemanticUnit("su-1", "她迟到但被关心", ["c1", "c2"], ["e-title", "e-asr-0014"], role_in_video="主旨")], [])
-        self.assertTrue(any(x["kind"] == "main_axis" for x in _structural_candidates(u, b)))
+        self.assertFalse(any(x["kind"] == "main_axis" for x in _structural_candidates(u, b)))
         # 只覆盖一个事件的主旨（通常是一句评价）→ 不入选
         u2, b2 = self._build([SemanticUnit("su-2", "这份通报在替学校开脱", ["c1"], ["e-title"], role_in_video="主旨")], [])
         self.assertFalse(any(x["kind"] == "main_axis" for x in _structural_candidates(u2, b2)))

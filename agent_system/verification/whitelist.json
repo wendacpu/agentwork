@@ -5,7 +5,13 @@
     "cctv.com",
     "people.com.cn",
     "thepaper.cn",
-    "jiemian.com",
-    "chinanews.com.cn"
+    "www.jiemian.com",
+    "www.chinanews.com.cn"
+  ],
+  "财经商业": [
+    "yicai.com",
+    "www.caixin.com",
+    "www.cs.com.cn",
+    "www.gov.cn"
   ]
 }

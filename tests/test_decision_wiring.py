@@ -54,6 +54,17 @@ class WiringTests(unittest.TestCase):
         self.assertTrue(any(req.get("forbidden_inferences") for req in payload["source_requirements"]),
                         "禁止推断没有进入生成入参")
 
+    def test_review_receives_video_domain_format_and_creator(self):
+        pipeline = Pipeline(self.dataset, self.storage, MockAdapter(), self.config)
+        task_id = pipeline.run("BV1Ltsf6xEpV")
+        snapshots = [e for e in self._events(task_id) if e["event_type"] == "prompt_snapshot" and e["payload"].get("task") == "review"]
+        self.assertTrue(snapshots)
+        materials = snapshots[-1]["payload"]["user_payload"]["video_materials"]
+        video = self.dataset.get("BV1Ltsf6xEpV")
+        self.assertEqual(materials["domain"], video.domain)
+        self.assertEqual(materials["format"], video.format)
+        self.assertEqual(materials["author"], video.author)
+
     def test_highlight_abandon_stops_instead_of_faking(self):
         class AbandonAdapter(MockAdapter):
             def complete(self, **kwargs):
@@ -104,7 +115,10 @@ class WiringTests(unittest.TestCase):
                         item["gates"]["G2"]["rule_ids"] = ["P1"]
                     if self.review_calls == 1:
                         for item in reply.data["reviews"]:
-                            item["gates"]["G3"] = {"status": "revise", "reason": "主看点缺失", "evidence_ids": [], "rule_ids": []}
+                            # 「写的是边角内容」= 标题主看点视频没有 = delivery_supported=False
+                            # （真实 R01 按 schema 必填该布尔），属 G3 硬伤走换看点重写；
+                            # 仅覆盖不全（delivery_supported=True）的软 revise 才交人审。
+                            item["gates"]["G3"] = {"status": "revise", "reason": "主看点缺失", "evidence_ids": [], "rule_ids": [], "delivery_supported": False, "core_covered": False}
                             item["issues"] = [{"issue_id": f'{item["candidate_id"]}-G3_CORE_POINT_OMITTED', "primary_dimension": "G3",
                                                "issue_code": "G3_CORE_POINT_OMITTED", "severity": "high", "repairable": True,
                                                "problem_span": "标题", "evidence_ids": [], "rule_ids": [],
@@ -115,12 +129,11 @@ class WiringTests(unittest.TestCase):
         self.config.extra["business_policy"] = {"status": "approved", "version": "test-v1", "rules": [{"rule_id": "P1", "text": "测试规则"}]}
         pipeline = Pipeline(self.dataset, self.storage, G3Adapter(), self.config)
         task_id = pipeline.run("BV1Ltsf6xEpV")
-        rewrites = [e for e in self._events(task_id) if e["event_type"] == "prompt_snapshot" and e["payload"].get("task") == "rewrite"]
-        self.assertTrue(rewrites, "G3 问题没有触发重写")
-        payload = rewrites[-1]["payload"]["user_payload"]
-        self.assertEqual(payload["rewrite_mode"], "看点")
-        self.assertTrue(payload["allow_highlight_change"])
-        self.assertEqual(payload["review_issues"][0]["rollback_to"], "N07")
+        highlights = [e for e in self._events(task_id) if e["event_type"] == "prompt_snapshot" and e["payload"].get("task") == "highlight"]
+        self.assertEqual(len(highlights), 2, "主旨缺失时应有且仅有一次重新提炼看点")
+        payload = highlights[-1]["payload"]["user_payload"]
+        self.assertTrue(any(i.get("rollback_to") == "N07" for i in payload["review_issues"]))
+        self.assertTrue(any(e["event_type"] == "highlight_reselected" for e in self._events(task_id)))
 
     def test_rewrite_records_resolved_and_repeated_issues(self):
         class RepeatAdapter(MockAdapter):
@@ -336,7 +349,9 @@ class WiringTests(unittest.TestCase):
             gold = Path(td) / "gold.csv"
             record_gold(video_id="v1", task_id="t1", candidate_id="c1", headline="标题", verdict="不可用", final_headline=None, criteria_id="", fallback_node="", reason="问题", reviewer="me", path=gold)
             record_gold(video_id="v2", task_id="t2", candidate_id="c1", headline="另一条", verdict="可用", final_headline="另一条", criteria_id="", fallback_node="", reason="", reviewer="me", path=gold)
-            remove_gold(video_id="v1", candidate_id="c1", path=gold)
+            # 撤回必须带任务身份：同一视频+候选 ID 可能来自不同实验臂，只按 video+candidate
+            # 匹配会把另一条任务的标签一起删掉（历史对照被污染的原因之一）。
+            remove_gold(video_id="v1", candidate_id="c1", task_id="t1", path=gold)
             with gold.open(encoding="utf-8-sig", newline="") as f:
                 rows = list(csv.DictReader(f))
             self.assertEqual(len(rows), 1)

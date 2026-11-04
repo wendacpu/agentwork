@@ -1,0 +1,183 @@
+{
+  "version": "food-v1",
+  "sample_size": 22,
+  "note": "300 条数据集里的美食 case",
+  "samples": [
+    {
+      "video_id": "BV1FwxF6AEoU",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "饮食文化",
+      "form": "探店体验",
+      "title": "去一趟北京吃遍全球美食，这么好的事情，我先去了！"
+    },
+    {
+      "video_id": "BV1Y9xa62E9C",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "叫什么名字妈妈也不知道，孩子们帮忙想想？"
+    },
+    {
+      "video_id": "BV14sxF6jEvh",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "饮食文化",
+      "form": "测评试用",
+      "title": "宝宝们爱看的脆脆泡菜～"
+    },
+    {
+      "video_id": "BV1Mrsf62EMH",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "饮食文化",
+      "form": "现场记录",
+      "title": "亲子互动游戏"
+    },
+    {
+      "video_id": "BV1wtxN6SE4A",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验",
+      "title": "贝宁科托努｜当你看到非洲普通人的晚餐，或许就不会再觉得生活理所当然…#隆睿闯地球 #贝宁 #科托努 #非洲旅行 #旅行v"
+    },
+    {
+      "video_id": "BV1NGxY6eEKZ",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "探店体验",
+      "title": "至今不知道番茄对老板做了什么，以至于这家店要把番茄满门抄斩"
+    },
+    {
+      "video_id": "BV1xMxY6TEGa",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "探店体验",
+      "title": "#港姐冠军嘉雯的美食地图 #香港家族 #香港美食 #香港探店 #香港 #哥登堡餐厅"
+    },
+    {
+      "video_id": "BV1Skxv6DEyq",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "这才是南瓜最好吃的做法！一个高压锅就搞定，比吃肉还香！"
+    },
+    {
+      "video_id": "BV1Smxv67EVR",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "现场记录",
+      "title": "日本美食蟹寿司！"
+    },
+    {
+      "video_id": "BV131xv6SEFK",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "面糊版韭菜盒子，详细不翻车的教程来啦！竟然不用揉面不用擀皮，搅一搅，刮一刮就行了，太简单了！#面糊版韭菜盒子#懒人韭菜盒"
+    },
+    {
+      "video_id": "BV1rcxi6BENc",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验",
+      "title": "谁懂啊！不用去广西在郑州就可以吃到广西特色美食~太幸福了"
+    },
+    {
+      "video_id": "BV1nKxi6KEBm",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "现场记录",
+      "title": "和地瓜摊上有趣的大朋友小朋友们"
+    },
+    {
+      "video_id": "BV1yRxv6CE4W",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "杭州美食之首!杭州酥鱼!"
+    },
+    {
+      "video_id": "BV1xRxv6CEfp",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "探店体验",
+      "title": "辣子快占半碗的牛肉面，你吃过吗？解馋又过瘾"
+    },
+    {
+      "video_id": "BV19ixc6oEaM",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验",
+      "title": "重庆天价哈儿面，四碗面就要872块钱，老板卖完笑得合不拢嘴"
+    },
+    {
+      "video_id": "BV1HHxv6KEPm",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验",
+      "title": "蚌埠烧烤女皇一串入魂，烤出人间烟火气。扬言蚌埠派烧烤必徐州的烧烤还好吃。#蚌埠美食 #人间烟火 #烧烤"
+    },
+    {
+      "video_id": "BV1Drxv6HEhj",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "街头小吃",
+      "form": "探店体验",
+      "title": "夯实的麦鼓头居然这么好吃？！"
+    },
+    {
+      "video_id": "BV1Drxv6HEm5",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "探店体验",
+      "title": "南京唯一一家 台灣沙茶魚頭火鍋"
+    },
+    {
+      "video_id": "BV13fxa6VEK6",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "探店体验",
+      "title": "上海专门吃驴肉的店，做法有很多"
+    },
+    {
+      "video_id": "BV1QBxc6xEmL",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "探店",
+      "form": "剧情短片",
+      "title": "吃饭不用钱？！这家店好怪"
+    },
+    {
+      "video_id": "BV1YFxv6nEJb",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烘焙",
+      "form": "教程演示",
+      "title": "低油无糖全麦恰巴塔❗️无种面直接法超简单超成功❗️#烘焙 #恰巴塔 #全麦恰巴塔 #懒人版恰巴塔"
+    },
+    {
+      "video_id": "BV159xe6sEBj",
+      "task_id": null,
+      "domain_1": "美食",
+      "domain_2": "烹饪教程",
+      "form": "教程演示",
+      "title": "葱烧鸡排，鸡腿的又一新吃法#葱烧鸡腿#鸡腿的神仙做法 #家常菜 #青年创作扶持计划第二季 #鸡排"
+    }
+  ]
+}

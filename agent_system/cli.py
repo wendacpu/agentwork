@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
+from types import SimpleNamespace
 from dataclasses import asdict
 from pathlib import Path
 
-from .config import RunConfig
+from .config import RunConfig, resolve_case_bank
 from .data import Dataset
 from .model import MockAdapter, OpenAICompatibleAdapter
 from .pipeline import Pipeline
@@ -25,16 +27,18 @@ TABLE = ROOT / "data" / "source" / "video_dataset.json"
 def build(args: argparse.Namespace):
     config = RunConfig.from_json(args.config) if args.config else RunConfig()
     config.apply_env()
-    dataset = Dataset.from_paths(TABLE, config.asset_root, config.ocr_mode)
-    storage = Storage(Path(config.output_dir) / "agent.db", case_bank_path=(config.case_bank or None))
+    dataset = Dataset.from_paths(config.table or TABLE, config.asset_root, config.ocr_mode)
+    storage = Storage(Path(config.output_dir) / "agent.db", case_bank_path=(resolve_case_bank(config) or None))
     return config, dataset, storage, make_pipeline(config, dataset, storage)
 
 
 PROVIDER_DEFAULTS = {
+    "ollama": ("http://localhost:11434/v1", "OLLAMA_API_KEY"),
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
     "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
     "kimi": ("https://api.moonshot.cn/v1", "MOONSHOT_API_KEY"),
     "juflow": ("https://juflowai.com/v1", "JUFLOW_API_KEY"),
+    "siliconflow": ("https://api.siliconflow.cn/v1", "SILICONFLOW_API_KEY"),
 }
 
 
@@ -46,8 +50,8 @@ def make_pipeline(config: RunConfig, dataset: Dataset, storage: Storage) -> Pipe
         raise ValueError(f"unknown provider: {config.model_provider}")
     default_base, default_key = PROVIDER_DEFAULTS[config.model_provider]
     base, key_env = config.base_url or default_base, config.api_key_env or default_key
-    adapter = OpenAICompatibleAdapter(base, key_env, config.generation_model, reasoning_effort=config.reasoning_effort)
-    review_adapter = OpenAICompatibleAdapter(base, key_env, config.review_model, reasoning_effort=config.reasoning_effort)
+    adapter = OpenAICompatibleAdapter(base, key_env, config.generation_model, timeout=config.model_timeout, reasoning_effort=config.reasoning_effort, structured_output=config.structured_output)
+    review_adapter = OpenAICompatibleAdapter(base, key_env, config.review_model, timeout=config.model_timeout, reasoning_effort=config.reasoning_effort, structured_output=config.structured_output)
     search_provider = create_search_provider(config.verification_provider, secret_id_env=config.verification_secret_id_env, secret_key_env=config.verification_secret_key_env) if config.verification_enabled else None
     return Pipeline(dataset, storage, adapter, config, review_adapter, search_provider)
 
@@ -61,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run"); r.add_argument("video_id")
     b = sub.add_parser("batch"); b.add_argument("video_ids", nargs="*"); b.add_argument("--limit", type=int, default=0)
     rr = sub.add_parser("report"); rr.add_argument("task_id"); rr.add_argument("--output", default="runtime/report.html")
-    rv = sub.add_parser("rereview"); rv.add_argument("task_id")
+    rv = sub.add_parser("rereview"); rv.add_argument("task_id"); rv.add_argument("--db", help="要重评的批次任务库（缺省 <output_dir>/agent.db）；原库只读打开")
     h = sub.add_parser("human"); h.add_argument("task_id"); h.add_argument("candidate_id"); h.add_argument("decision", choices=["approved", "marginal", "rejected"]); h.add_argument("--headline"); h.add_argument("--reason", default=""); h.add_argument("--criteria", default="", help="可选问题归类 ID；不确定根因时留空"); h.add_argument("--reason-type", default="", help="可选根因归类；不确定时留空"); h.add_argument("--reviewer")
     c = sub.add_parser("case"); c.add_argument("task_id"); c.add_argument("case_id"); c.add_argument("case_type", choices=["rule", "fact", "expression"]); c.add_argument("problem_type"); c.add_argument("bad_example"); c.add_argument("good_example"); c.add_argument("applicability"); c.add_argument("--confirm", action="store_true"); c.add_argument("--scope", default=""); c.add_argument("--source-evidence", nargs="*", default=[]); c.add_argument("--case-version", default="v1")
     cl = sub.add_parser("case-list"); cl.add_argument("--all", action="store_true", help="含未确认草稿")
@@ -72,6 +76,27 @@ def main(argv: list[str] | None = None) -> int:
     il = sub.add_parser("import-labels"); il.add_argument("path")
     dbg = sub.add_parser("debug"); dbg.add_argument("--host", default="127.0.0.1"); dbg.add_argument("--port", type=int, default=8765); dbg.add_argument("--db-path", action="append", help="可多次；缺省扫 <output_dir>/*/agent.db（含新任务默认库）")
     args = p.parse_args(argv)
+    if args.cmd == "rereview":
+        config = RunConfig.from_json(args.config) if args.config else RunConfig()
+        config.apply_env()
+        source = Path(args.db or (Path(config.output_dir) / "agent.db")).resolve()
+        if not source.is_file():
+            print(json.dumps({"error": f"找不到任务库：{source}"}, ensure_ascii=False))
+            return 2
+        conn = sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            def get_task(task_id):
+                row = conn.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+                if row is None:
+                    raise KeyError(task_id)
+                return row
+            storage = SimpleNamespace(path=str(source), conn=conn, case_conn=conn, get_task=get_task)
+            pipeline = make_pipeline(config, None, storage)
+            print(pipeline.rereview(args.task_id))
+        finally:
+            conn.close()
+        return 0
     config, dataset, storage, pipeline = build(args)
     if args.cmd == "audit": print(json.dumps(dataset.audit(), ensure_ascii=False, indent=2)); return 0
     if args.cmd == "ingest":
@@ -96,7 +121,6 @@ def main(argv: list[str] | None = None) -> int:
                     break
         print(json.dumps(results, ensure_ascii=False, indent=2)); return 0
     if args.cmd == "report": print(render_task(storage, args.task_id, args.output)); return 0
-    if args.cmd == "rereview": print(pipeline.rereview(args.task_id)); return 0
     if args.cmd == "human":
         payload = {
             "candidate_id": args.candidate_id, "decision": args.decision,
@@ -109,13 +133,14 @@ def main(argv: list[str] | None = None) -> int:
         state = json.loads(row["state_json"] or "{}")
         candidate = next((c for c in (state.get("candidates") or []) if c.get("candidate_id") == args.candidate_id), {})
         route = state.get("route") or {}
+        original_route = state.get("original_system_route") or route
         path = record_gold(
             video_id=row["video_id"], task_id=args.task_id, candidate_id=args.candidate_id,
             headline=str(candidate.get("rendered_title") or candidate.get("headline") or ""),
             verdict={"approved": "可用", "marginal": "勉强通过"}.get(args.decision, "不可用"),
             final_headline=args.headline, criteria_id=args.criteria, fallback_node="",
             reason=args.reason, reviewer=args.reviewer or "unnamed", route=str(route.get("action") or ""),
-            recommended="是" if route.get("recommended_candidate_id") == args.candidate_id else "",
+            recommended="是" if original_route.get("recommended_candidate_id") == args.candidate_id else "",
         )
         print(json.dumps({"task_id": args.task_id, "gold": str(path)}, ensure_ascii=False)); return 0
     if args.cmd == "case":

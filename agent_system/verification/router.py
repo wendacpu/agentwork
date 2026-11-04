@@ -50,11 +50,149 @@ def whitelist_for(domain: dict[str, str] | None) -> list[str]:
     return whitelist.get(second) or whitelist.get(first) or whitelist.get("default", [])
 
 
-def pick_core_claims(claims: list[Any], config: Any) -> list[Any]:
-    """断言筛选：只查可核查的事实性断言，取前 max_verification_claims 条。"""
+# ---------------------------------------------------------------------------
+# 核查选择：off / static / dynamic 三层
+#
+# static 是历史行为（按品类路由）；dynamic 让理解节点给出「这条视频要不要外部核查」
+# 的建议，但建议必须经过程序这一层——命中强制清单的项模型无权关闭。
+# 设计意图：安全网（mandatory）与收益口（model 可以说不查）分开，
+# 模型只能在非强制项上做减法。
+# ---------------------------------------------------------------------------
+
+VERIFICATION_MODES = ("off", "static", "dynamic")
+
+_SUGGESTION_KEYS = ("verification_suggestion", "verificationSuggestion")
+_ENVELOPE_KEYS = ("Understanding", "understanding", "result", "output", "data")
+
+
+def normalize_verification_mode(config: Any) -> str:
+    """未知取值一律退回 static（历史行为），不静默升级为 dynamic。"""
+    raw = str(getattr(config, "verification_mode", "static") or "static").strip().lower()
+    return raw if raw in VERIFICATION_MODES else "static"
+
+
+def mandatory_verification(claims: list[Any], video: Any, config: Any) -> tuple[bool, str]:
+    """程序强制条件：命中即必须核查，dynamic 模式下模型无权关闭。
+
+    两份清单默认都是空的，需业务侧显式配置——强制清单属于业务政策，
+    不该由代码默认拍板。推荐清单见 docs/verification-dynamic-routing.md。
+    """
+    dom = getattr(video, "domain", None) or {}
+    mandatory_domains = {
+        str(x).strip() for x in (getattr(config, "verification_mandatory_domains", []) or []) if str(x).strip()
+    }
+    if mandatory_domains:
+        for level in ("一级", "二级"):
+            name = str(dom.get(level, "")).strip()
+            if name and name in mandatory_domains:
+                return True, f"mandatory_domain:{name}"
+    keywords = [
+        str(x).strip() for x in (getattr(config, "verification_mandatory_keywords", []) or []) if str(x).strip()
+    ]
+    if keywords:
+        for claim in claims or []:
+            text = str(getattr(claim, "text", "") or "")
+            if not text:
+                continue
+            for word in keywords:
+                if word in text:
+                    return True, f"mandatory_keyword:{word}"
+    return False, ""
+
+
+def _find_suggestion(raw: Any, depth: int = 0) -> dict[str, Any] | None:
+    """模型有时把建议套在 Understanding/result 这类信封里，逐层找。"""
+    if depth > 3 or not isinstance(raw, dict):
+        return None
+    for key in _SUGGESTION_KEYS:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            return value
+    for wrapper in _ENVELOPE_KEYS:
+        inner = raw.get(wrapper)
+        if isinstance(inner, dict):
+            found = _find_suggestion(inner, depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def extract_verification_suggestion(raw: Any) -> dict[str, Any] | None:
+    """从理解节点的原始输出里读核查建议。
+
+    只有两种返回：合法建议，或 None（=「没有建议」）。
+    字段缺失、类型不对、verification_needed 不是布尔值，一律 None——
+    调用方据此回退静态路由，绝不能把解析失败当成「模型说不用查」。
+    """
+    found = _find_suggestion(raw)
+    if not isinstance(found, dict):
+        return None
+    needed = found.get("verification_needed")
+    if not isinstance(needed, bool):
+        return None
+    claim_ids = found.get("verification_claim_ids")
+    if not isinstance(claim_ids, list):
+        claim_ids = []
+    return {
+        "needed": needed,
+        "reason": str(found.get("verification_reason") or found.get("reason") or "").strip(),
+        "skip_reason": str(found.get("skip_reason") or "").strip(),
+        "claim_ids": [str(x).strip() for x in claim_ids if str(x).strip()],
+    }
+
+
+def resolve_verification(
+    video: Any, claims: list[Any], suggestion: dict[str, Any] | None, config: Any
+) -> dict[str, Any]:
+    """决定这次任务要不要做外部核查，并留下判定来源（可审计）。
+
+    decider 取值：off / disabled / mandatory / model / static / static_fallback
+    dynamic 下没有可用建议时回退 static，并标 static_fallback，便于统计回退比例。
+    """
+    mode = normalize_verification_mode(config)
+    if mode == "off":
+        return {"needed": False, "decider": "off", "reason": "verification_mode=off"}
+    if not getattr(config, "verification_enabled", False):
+        return {"needed": False, "decider": "disabled", "reason": "verification_enabled=false"}
+
+    forced, why = mandatory_verification(claims, video, config)
+    if forced:
+        return {"needed": True, "decider": "mandatory", "reason": why}
+
+    if mode == "dynamic" and suggestion is not None:
+        needed = bool(suggestion.get("needed"))
+        reason = suggestion.get("reason") if needed else (suggestion.get("skip_reason") or suggestion.get("reason"))
+        return {
+            "needed": needed,
+            "decider": "model",
+            "reason": str(reason or ("model_requested" if needed else "model_skipped")),
+        }
+
+    needed = is_verifiable(getattr(video, "domain", None), config)
+    return {
+        "needed": needed,
+        "decider": "static_fallback" if mode == "dynamic" else "static",
+        "reason": "domain_route" if needed else "domain_not_covered",
+    }
+
+
+
+def pick_core_claims(claims: list[Any], config: Any, preferred_ids: list[str] | None = None) -> list[Any]:
+    """断言筛选：只查可核查的事实性断言，取前 max_verification_claims 条。
+
+    模型显式点了 claim_ids 时优先——但仍须先通过 claim_type 可核查过滤，
+    否则模型可以把「观点/预测」这类不可核查内容塞进检索队列。
+    """
     verifiable_types = set(getattr(config, "verifiable_claim_types", []) or ["observable", "source_claim"])
     candidates = [c for c in claims if getattr(c, "claim_type", "") in verifiable_types]
     limit = int(getattr(config, "max_verification_claims", 3))
+    preferred = [str(x).strip() for x in (preferred_ids or []) if str(x).strip()]
+    if preferred:
+        wanted = set(preferred)
+        by_id = {str(getattr(c, "claim_id", "")): c for c in candidates}
+        picked = [by_id[cid] for cid in preferred if cid in by_id]
+        rest = [c for c in candidates if str(getattr(c, "claim_id", "")) not in wanted]
+        return (picked + rest)[:limit]
     return candidates[:limit]
 
 

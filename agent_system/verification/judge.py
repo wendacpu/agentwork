@@ -31,6 +31,7 @@ def compute_risk(claims: list[Any], refute_min_sources: int = 2, confidence_thre
         v = getattr(c, "verification", None)
         if (
             v is not None and v.verdict == "refuted"
+            and not getattr(v, "downgraded", False)
             and len(set(v.sources)) >= refute_min_sources
             and v.confidence >= confidence_threshold
         ): 

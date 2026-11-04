@@ -12,6 +12,15 @@
   "schema_retry_limit": 1,
   "memory_call_limit": 6,
   "verification_enabled": false,
+  "verification_mode": "static",
+  "verification_mandatory_domains": ["时事社会", "财经商业"],
+  "verification_mandatory_keywords": [
+    "治愈", "疗效", "诊断", "处方", "剂量", "用药", "确诊", "手术",
+    "收益", "涨幅", "涨停", "回报", "理财", "基金", "股票", "利率",
+    "判刑", "判决", "量刑", "起诉", "拘留", "立案",
+    "伤亡", "遇难", "死亡", "事故", "地震", "火灾", "洪水", "暴雨", "灾害"
+  ],
+  "verification_require_whitelist": true,
   "verification_provider": "wsa",
   "verification_secret_id_env": "WSA_SECRET_ID",
   "verification_secret_key_env": "WSA_SECRET_KEY",

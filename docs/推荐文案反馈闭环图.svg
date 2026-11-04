@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3360" height="1960" viewBox="0 0 3360 1960" role="img" aria-labelledby="title"><title id="title">反馈闭环图</title><defs><marker id="m-56677D" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56677D"/></marker><marker id="m-B64848" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#B64848"/></marker><marker id="m-7850C4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7850C4"/></marker><marker id="m-087E82" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#087E82"/></marker><marker id="m-B77915" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#B77915"/></marker><marker id="m-2E67CB" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#2E67CB"/></marker><marker id="m-24364D" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,4.5 L0,9 Z" fill="#24364D"/></marker><style>text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;}</style></defs>
+<rect x="0" y="0" width="3360" height="1960" rx="0" fill="#F5F7FA" stroke="#F5F7FA" stroke-width="2"/>
+<text x="60" y="88" font-size="50" fill="#24364D" font-weight="750" text-anchor="start">反馈闭环图</text>
+<rect x="2500" y="51" width="27" height="27" rx="5" fill="#FFF1CF" stroke="#D09D39" stroke-width="2"/>
+<text x="2545" y="76" font-size="24" fill="#56677D" font-weight="450" text-anchor="start">人工确认</text>
+<circle cx="2800" cy="68" r="27" fill="white" stroke="#7850C4" stroke-width="2.5"/>
+<text x="2800" y="77" font-size="24" fill="#7850C4" font-weight="700" text-anchor="middle">D</text>
+<text x="2840" y="76" font-size="24" fill="#56677D" font-weight="450" text-anchor="start">同号接点跨区续接</text>
+<circle cx="80" cy="147" r="27" fill="white" stroke="#7850C4" stroke-width="2.5"/>
+<text x="80" y="156" font-size="24" fill="#7850C4" font-weight="700" text-anchor="middle">F</text>
+<text x="130" y="157" font-size="30" fill="#24364D" font-weight="700" text-anchor="start">反馈回收</text>
+<rect id="human-feedback" x="70" y="195" width="990" height="140" rx="14" fill="#FFF5DF" stroke="#D8B979" stroke-width="2"/>
+<text x="94" y="234" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="human-feedback">人工审核意见</text>
+<text x="94" y="272" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="human-feedback">可用 / 勉强通过 / 不可用，以及问题说明</text>
+<text x="94" y="307" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="human-feedback">关联原视频、候选文案、人工修改和评审结果</text>
+<rect id="signals" x="1110" y="195" width="1000" height="140" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="1134" y="234" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="signals">运行与校验信号</text>
+<text x="1134" y="272" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="signals">缺材料、程序拦截、调用失败、重写耗尽等</text>
+<text x="1134" y="307" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="signals">先作为调查线索，不直接等同已确认 Bad Case</text>
+<rect id="batch" x="2160" y="195" width="1130" height="140" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="2184" y="234" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="batch">冻结批次反馈</text>
+<text x="2184" y="272" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="batch">保存在独立反馈库，不自动进入修复或案例学习</text>
+<text x="2184" y="307" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="batch">需要复用时，另行核实反馈与适用条件</text>
+<rect id="intake" x="800" y="395" width="1340" height="105" rx="14" fill="#EAF0F7" stroke="#AEBFD5" stroke-width="2"/>
+<text x="824" y="434" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="intake">系统整理待调查问题与证据</text>
+<text x="824" y="472" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="intake">关联视频、候选、节点输入输出、评审意见、版本与人工判定</text>
+<text x="60" y="570" font-size="30" fill="#24364D" font-weight="700" text-anchor="start">问题修复</text>
+<rect id="locate" x="70" y="610" width="520" height="160" rx="14" fill="#FFF5DF" stroke="#D8B979" stroke-width="2"/>
+<text x="94" y="649" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="locate">人工核实原因与责任环节</text>
+<text x="94" y="687" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="locate">材料 / 理解 / 看点 / 表达 / 评审 / 程序</text>
+<text x="94" y="722" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="locate">核实证据，不把自动归类当作已确认根因</text>
+<polygon id="enough" points="800,605.0 950.0,690 800,775.0 650.0,690" fill="#FFFAEE" stroke="#B77915" stroke-width="2.5"/>
+<text x="800" y="680.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">原因有证据</text>
+<text x="800" y="715.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">支持？</text>
+<rect id="change" x="1060" y="595" width="650" height="190" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="1084" y="634" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="change">按原因选择修复方式</text>
+<text x="1084" y="672" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="change">指令不清 → 改提示词；案例不准 → 改检索</text>
+<text x="1084" y="707" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="change">条件明确 → 补规则；传递或路由错误 → 改程序</text>
+<text x="1084" y="742" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="change">形成具体改动、预期与验收样本</text>
+<rect id="regression" x="1820" y="595" width="580" height="190" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="1844" y="634" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="regression">回归测试与人工核验</text>
+<text x="1844" y="672" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="regression">原案例修好；同类样本通过</text>
+<text x="1844" y="707" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="regression">历史正确案例不被误伤</text>
+<text x="1844" y="742" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="regression">核验结果绑定源码、规则与测试版本</text>
+<polygon id="passed" points="2580,605.0 2720.0,690 2580,775.0 2440.0,690" fill="#FFFAEE" stroke="#B77915" stroke-width="2.5"/>
+<text x="2580" y="680.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">测试与核验</text>
+<text x="2580" y="715.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">通过？</text>
+<rect id="approve" x="2790" y="595" width="500" height="190" rx="14" fill="#FFF5DF" stroke="#D8B979" stroke-width="2"/>
+<text x="2814" y="634" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="approve">人工批准并观察</text>
+<text x="2814" y="672" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="approve">批准已验证的规则或版本</text>
+<text x="2814" y="707" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="approve">不自动修改或部署生产系统</text>
+<text x="2814" y="742" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="approve">后续使用中继续记录问题</text>
+<rect id="more-evidence" x="570" y="860" width="470" height="110" rx="14" fill="#FFF9EC" stroke="#DBC393" stroke-width="2"/>
+<text x="594" y="899" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="more-evidence">补充证据并重新定位</text>
+<text x="594" y="937" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="more-evidence">不直接进入修改</text>
+<rect id="redo" x="1880" y="860" width="600" height="110" rx="14" fill="#FFF4F4" stroke="#DBAEAE" stroke-width="2"/>
+<text x="1904" y="899" font-size="28" fill="#B64848" font-weight="700" text-anchor="start" data-owner="redo">未通过：返回修复</text>
+<text x="1904" y="937" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="redo">若原因不成立，补证据并重新定位</text>
+<polygon id="recurrence" points="3030,820.0 3205.0,905 3030,990.0 2855.0,905" fill="#FFFAEE" stroke="#B77915" stroke-width="2.5"/>
+<text x="3030" y="895.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">出现疑似</text>
+<text x="3030" y="930.5" font-size="24" fill="#B77915" font-weight="650" text-anchor="middle">同类复发？</text>
+<rect id="close" x="2630" y="1120" width="660" height="110" rx="14" fill="#FFF5DF" stroke="#D8B979" stroke-width="2"/>
+<text x="2654" y="1159" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="close">人工确认观察结果并结案</text>
+<text x="2654" y="1197" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="close">需明确观察证据，不以“无反馈”代替验证</text>
+<rect id="observe-more" x="2630" y="1005" width="660" height="95" rx="14" fill="#FFF9EC" stroke="#DBC393" stroke-width="2"/>
+<text x="2654" y="1044" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="observe-more">暂无复发但证据不足</text>
+<text x="2654" y="1082" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="observe-more">继续观察，不直接结案</text>
+<text x="60" y="1240" font-size="30" fill="#24364D" font-weight="700" text-anchor="start">案例沉淀</text>
+<rect id="case-feedback" x="70" y="1290" width="520" height="140" rx="14" fill="#FFF5DF" stroke="#D8B979" stroke-width="2"/>
+<text x="94" y="1329" font-size="28" fill="#B77915" font-weight="700" text-anchor="start" data-owner="case-feedback">符合条件的人工反馈</text>
+<text x="94" y="1367" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="case-feedback">确认可复用问题与处理经验</text>
+<text x="94" y="1402" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="case-feedback">不自动把未核实归因写成长期经验</text>
+<polygon id="reusable" points="800,1280.0 950.0,1360 800,1440.0 650.0,1360" fill="#FAF7FF" stroke="#7850C4" stroke-width="2.5"/>
+<text x="800" y="1350.5" font-size="24" fill="#7850C4" font-weight="650" text-anchor="middle">可作为</text>
+<text x="800" y="1385.5" font-size="24" fill="#7850C4" font-weight="650" text-anchor="middle">复用案例？</text>
+<rect id="memory" x="1060" y="1290" width="650" height="140" rx="14" fill="#F4EFFB" stroke="#C5B4E0" stroke-width="2"/>
+<text x="1084" y="1329" font-size="28" fill="#7850C4" font-weight="700" text-anchor="start" data-owner="memory">Memory 案例库</text>
+<text x="1084" y="1367" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="memory">保存适用场景、正反例与处理经验</text>
+<text x="1084" y="1402" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="memory">保留确认状态、来源与适用版本</text>
+<rect id="retrieval" x="1820" y="1290" width="580" height="140" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="1844" y="1329" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="retrieval">按条件检索</text>
+<text x="1844" y="1367" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="retrieval">匹配场景、问题类型与版本</text>
+<text x="1844" y="1402" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="retrieval">未命中时按当前材料与规则继续</text>
+<rect id="gen-reference" x="2700" y="1290" width="590" height="140" rx="14" fill="#F4EFFB" stroke="#C5B4E0" stroke-width="2"/>
+<text x="2724" y="1329" font-size="28" fill="#7850C4" font-weight="700" text-anchor="start" data-owner="gen-reference">文案生成 Agent 参考</text>
+<text x="2724" y="1367" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="gen-reference">只参考表达与处理方式</text>
+<text x="2724" y="1402" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="gen-reference">事实必须来自当前视频</text>
+<rect id="archive" x="570" y="1510" width="470" height="100" rx="14" fill="white" stroke="#CCD7E5" stroke-width="2"/>
+<text x="594" y="1549" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="archive">保留为原始反馈</text>
+<text x="594" y="1587" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="archive">不直接进入生成参考</text>
+<text x="60" y="1700" font-size="30" fill="#24364D" font-weight="700" text-anchor="start">数据资产</text>
+<rect id="asset-case" x="70" y="1740" width="760" height="150" rx="14" fill="#EDE7F7" stroke="#C5B4E0" stroke-width="2"/>
+<text x="94" y="1779" font-size="28" fill="#7850C4" font-weight="700" text-anchor="start" data-owner="asset-case">案例库</text>
+<text x="94" y="1817" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="asset-case">正反例、适用场景、处理经验与确认来源</text>
+<rect id="asset-test" x="890" y="1740" width="760" height="150" rx="14" fill="#E8EFF7" stroke="#C2D0E1" stroke-width="2"/>
+<text x="914" y="1779" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="asset-test">评测与回归样本</text>
+<text x="914" y="1817" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="asset-test">原例、同类样本、历史正确案例与判定</text>
+<rect id="asset-repair" x="1710" y="1740" width="760" height="150" rx="14" fill="#E8EFF7" stroke="#C2D0E1" stroke-width="2"/>
+<text x="1734" y="1779" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="asset-repair">修复与批准记录</text>
+<text x="1734" y="1817" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="asset-repair">修复内容、核验结果、版本与批准人</text>
+<rect id="asset-trace" x="2530" y="1740" width="760" height="150" rx="14" fill="#E8EFF7" stroke="#C2D0E1" stroke-width="2"/>
+<text x="2554" y="1779" font-size="28" fill="#24364D" font-weight="700" text-anchor="start" data-owner="asset-trace">任务与证据记录</text>
+<text x="2554" y="1817" font-size="24" fill="#56677D" font-weight="450" text-anchor="start" data-owner="asset-trace">输入输出、候选、人工意见与完整轨迹</text>
+<circle cx="3250" cy="625" r="27" fill="white" stroke="#56677D" stroke-width="2.5"/>
+<text x="3250" y="634" font-size="24" fill="#56677D" font-weight="700" text-anchor="middle">V</text>
+<circle cx="2090" cy="1690" r="27" fill="white" stroke="#56677D" stroke-width="2.5"/>
+<text x="2090" y="1699" font-size="24" fill="#56677D" font-weight="700" text-anchor="middle">V</text>
+<circle cx="2220" cy="490" r="27" fill="white" stroke="#56677D" stroke-width="2.5"/>
+<text x="2220" y="499" font-size="24" fill="#56677D" font-weight="700" text-anchor="middle">L</text>
+<circle cx="2900" cy="1690" r="27" fill="white" stroke="#56677D" stroke-width="2.5"/>
+<text x="2900" y="1699" font-size="24" fill="#56677D" font-weight="700" text-anchor="middle">L</text>
+<path d="M1590,68 L1665,68" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1590,68 L1665,68" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M1860,68 L1935,68" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1860,68 L1935,68" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M2180,68 L2255,68" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2180,68 L2255,68" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-7850C4)"/>
+<path d="M80,174 L80,195" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M80,174 L80,195" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-7850C4)"/>
+<path d="M565,335 L565,365 L1200,365 L1200,395" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M565,335 L565,365 L1200,365 L1200,395" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M1610,335 L1610,395" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1610,335 L1610,395" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M2700,335 L2700,445 L2140,445" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2700,335 L2700,445 L2140,445" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M1470,500 L1470,540 L330,540 L330,610" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1470,500 L1470,540 L330,540 L330,610" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M590,690 L650,690" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M590,690 L650,690" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M950,690 L1060,690" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M950,690 L1060,690" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M1710,690 L1820,690" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1710,690 L1820,690" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M2400,690 L2440,690" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2400,690 L2440,690" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M2720,690 L2790,690" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2720,690 L2790,690" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M800,775 L800,860" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M800,775 L800,860" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B77915)"/>
+<path d="M570,915 L330,915 L330,770" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M570,915 L330,915 L330,770" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B77915)"/>
+<path d="M2580,775 L2580,915 L2480,915" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2580,775 L2580,915 L2480,915" fill="none" stroke="#B64848" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B64848)"/>
+<path d="M1880,915 L1385,915 L1385,785" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1880,915 L1385,915 L1385,785" fill="none" stroke="#B64848" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B64848)"/>
+<path d="M2180,970 L2180,1030 L140,1030 L140,770" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2180,970 L2180,1030 L140,1030 L140,770" fill="none" stroke="#B64848" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B64848)"/>
+<path d="M3030,785 L3030,820" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M3030,785 L3030,820" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M2855,905 L2550,905 L2550,1180 L250,1180 L250,770" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2855,905 L2550,905 L2550,1180 L250,1180 L250,770" fill="none" stroke="#B64848" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B64848)"/>
+<path d="M3030,990 L3030,1005" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M3030,990 L3030,1005" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-B77915)"/>
+<path d="M3205,905 L3320,905 L3320,1175 L3290,1175" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M3205,905 L3320,905 L3320,1175 L3290,1175" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-B77915)"/>
+<path d="M2630,1050 L2605,1050 L2605,800 L2840,800 L2840,785" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2630,1050 L2605,1050 L2605,800 L2840,800 L2840,785" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-B77915)"/>
+<path d="M330,335 L35,335 L35,1360 L70,1360" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M330,335 L35,335 L35,1360 L70,1360" fill="none" stroke="#B77915" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-B77915)"/>
+<path d="M590,1360 L650,1360" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M590,1360 L650,1360" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M950,1360 L1060,1360" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M950,1360 L1060,1360" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-7850C4)"/>
+<path d="M1710,1360 L1820,1360" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1710,1360 L1820,1360" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-7850C4)"/>
+<path d="M2400,1360 L2700,1360" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2400,1360 L2700,1360" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="9 7" marker-end="url(#m-7850C4)"/>
+<path d="M800,1440 L800,1510" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M800,1440 L800,1510" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" marker-end="url(#m-56677D)"/>
+<path d="M1385,1430 L1385,1650 L450,1650 L450,1740" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M1385,1430 L1385,1650 L450,1650 L450,1740" fill="none" stroke="#7850C4" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-7850C4)"/>
+<path d="M2400,780 L2500,780 L2500,1130 L1170,1130 L1170,1210 L1750,1210 L1750,1670 L1270,1670 L1270,1740" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2400,780 L2500,780 L2500,1130 L1170,1130 L1170,1210 L1750,1210 L1750,1670 L1270,1670 L1270,1740" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M3200,595 L3200,625 L3223,625" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M3200,595 L3200,625 L3223,625" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M2090,1717 L2090,1740" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2090,1717 L2090,1740" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M2140,480 L2160,480 L2160,490 L2193,490" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2140,480 L2160,480 L2160,490 L2193,490" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<path d="M2900,1717 L2900,1740" fill="none" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round"/>
+<path d="M2900,1717 L2900,1740" fill="none" stroke="#56677D" stroke-width="2.8" stroke-linejoin="round" stroke-dasharray="3 7" marker-end="url(#m-56677D)"/>
+<text x="1685" y="76" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">业务主线</text>
+<text x="1955" y="76" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">数据 / 调用</text>
+<text x="2275" y="76" font-size="24" fill="#7850C4" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">返工 / 回流</text>
+<text x="610" y="358" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">问题与人工判定</text>
+<text x="1640" y="374" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">异常与拦截记录</text>
+<text x="2270" y="435" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">经人工核实后另行纳入</text>
+<text x="650" y="530" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">待调查问题与证据</text>
+<text x="592" y="670" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">原因线索</text>
+<text x="973" y="670" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">充分</text>
+<text x="1720" y="670" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">修复版本</text>
+<text x="2735" y="670" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">是</text>
+<text x="820" y="825" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">不足</text>
+<text x="345" y="895" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">补充材料与运行证据</text>
+<text x="2555" y="837" font-size="24" fill="#B64848" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">否：失败样本与核验意见</text>
+<text x="1450" y="899" font-size="24" fill="#B64848" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">修复方向成立：继续修改</text>
+<text x="800" y="1017" font-size="24" fill="#B64848" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">原因不成立：重新定位</text>
+<text x="3050" y="810" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">新任务反馈</text>
+<text x="1400" y="1167" font-size="24" fill="#B64848" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">有：人工核实是否同根因，必要时重开</text>
+<text x="3050" y="998" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">观察不足</text>
+<text x="3338" y="920" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" transform="rotate(90 3338 920)" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">无复发且证据充分</text>
+<text x="2470" y="1120" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">继续观察</text>
+<text x="57" y="1210" font-size="24" fill="#B77915" font-weight="550" text-anchor="start" transform="rotate(-90 57 1210)" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">人工判定与确认信息</text>
+<text x="980" y="1340" font-size="24" fill="#7850C4" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">是</text>
+<text x="1720" y="1340" font-size="24" fill="#7850C4" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">已确认案例</text>
+<text x="2445" y="1340" font-size="24" fill="#7850C4" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">命中相关案例</text>
+<text x="820" y="1482" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">否</text>
+<text x="750" y="1637" font-size="24" fill="#7850C4" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">已确认案例</text>
+<text x="1790" y="1197" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">原例、反例与验证结果</text>
+<text x="2130" y="1724" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">批准版本与核验结果</text>
+<text x="2940" y="1724" font-size="24" fill="#56677D" font-weight="550" text-anchor="start" paint-order="stroke" stroke="#F5F7FA" stroke-width="8" stroke-linejoin="round">节点轨迹与问题证据</text>
+</svg>

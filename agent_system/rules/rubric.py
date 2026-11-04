@@ -16,11 +16,11 @@ STRATEGY_ENUM = ["问题方法", "对照比较", "前后变化", "疑问留答",
 
 # D05 条件 → 策略（与 rulepacks/forms.md 与 U-W02 对齐）
 STRATEGY_TRIGGERS = {
-    "问题方法": "视频给出方法、步骤或可照做的操作",
-    "对照比较": "材料包含两个及以上对象的同条件对比",
-    "前后变化": "材料展示同一对象的前后两个状态",
-    "疑问留答": "视频确实在该片段内给出答案",
-    "直接描述": "以上条件都不满足时的兜底",
+    "问题方法": "视频实际提供与标题问题对应的方法或步骤，不夸大效果",
+    "对照比较": "材料支持标题中的比较对象、维度及关系，不凭对象并存拼造比较",
+    "前后变化": "材料支持同一对象的前后状态及标题所述变化，不臆造原因",
+    "疑问留答": "视频实际回答标题提出的同一问题、对象与视角，且未将次要内容包装为主旨；无需原文出现问句",
+    "直接描述": "忠实描述实际内容；其他结构不适合或不确定时优先使用，不为凑钩子创造结构",
 }
 
 # D08 检查词 → 现有维度（语言归 Q1：读不懂仍有程度差别，不直接判不可用）
@@ -58,7 +58,7 @@ TEMP_RUBRIC: dict[str, Any] = {
         "max_chars": 20,
         "counting": "unicode_characters_including_punctuation_digits_spaces",
         "ending_question_mark_forbidden": True,
-        "priority_order": ["evidence_and_fact_boundary", "approved_business_policy", "triggered_conditional_rules", "independent_comprehension_and_delivery", "expression_preferences", "memory_examples"],
+        "priority_order": ["configured_display_constraints", "evidence_and_fact_boundary", "approved_business_policy", "triggered_conditional_rules", "independent_comprehension_and_delivery", "expression_preferences", "memory_examples"],
         "hard": ["do_not_add_unsupported_facts", "approved_business_policy", "configured_display_constraints"],
         "conditional": ["attribute_source_when_boundary_requires_it", "retain_entity_role_when_omission_changes_meaning", "retain_limits_when_claim_is_limited"],
         "preferred": ["specific_relevant_detail", "information_anchor", "natural_expression", "appeal"],
@@ -70,15 +70,17 @@ TEMP_RUBRIC: dict[str, Any] = {
     "issue_codes": [
         "G1_UNSUPPORTED_FACT", "G1_ENTITY_ROLE_MISATTRIBUTED", "G1_SOURCE_ATTRIBUTION_MISSING", "G1_SOURCE_UNVERIFIED",
         "G1_ASSERTION_OVERSTATED", "G1_CURRENTNESS_ERROR", "G1_MISSING_LIMIT",
+        # 外部核查存在反驳但证据不足：归属语不够，标题必须明确标注争议
+        "G1_MISSING_DISPUTE_MARK",
         "G1_PENDING_VERIFICATION",
         # 陈述只有模型描述/画面路径支撑，没引用能用的一手文本（ASR/OCR/原题）：
         # 这是"描述编造"的入口，比事后判定事实错更早一层
         "G1_PRIMARY_EVIDENCE_MISSING",
-        "G2_POLICY_VIOLATION", "G2_POLICY_MISSING", "G3_CORE_POINT_OMITTED", "G3_OVER_PROMISE", "G3_NOT_DELIVERED",
+        "G2_POLICY_VIOLATION", "G2_POLICY_MISSING", "G3_CORE_POINT_OMITTED", "G3_OVER_PROMISE", "G3_NOT_DELIVERED", "G3_META_DISCOURSE",
         "Q2_STRATEGY_MISMATCH",
         "Q1_UNCLEAR", "Q2_TOO_GENERIC", "Q3_LOW_APPEAL",
         "G4_EMPTY_TITLE", "G4_LENGTH_EXCEEDED", "G4_ENDING_QUESTION_MARK", "G4_REQUIRED_FIELD_MISSING", "G4_INVALID_REFERENCE", "G4_SCHEMA_INVALID",
-        "G4_META_PHRASE",
+        "G4_META_PHRASE", "G4_VERIFICATION_CONCLUSION", "G4_INCOMPLETE_ATTRIBUTION", "G4_NUMERIC_CONFLICT",
         # 平台标注前缀（剧情演绎 / AI生成）：与正文合计计长，由程序判定而非模型自由判
         "G4_PREFIX_MISSING", "G4_PREFIX_UNEXPECTED", "G4_PREFIX_BUDGET_EXHAUSTED", "G4_PREFIX_SELF_DECLARED", "G4_INLINE_PREFIX_IN_BODY",
     ],
