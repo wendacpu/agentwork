@@ -38,6 +38,18 @@ class SignalAdapter(MockAdapter):
         elif kwargs["task"] in {"generate", "rewrite"}:
             reply.data["candidates"] = reply.data["candidates"][:1]
             reply.data["candidates"][0]["headline"] = self.headline
+        elif kwargs["task"] == "review":
+            # 本组只隔离信号守卫：假定评审模型对 G3 作乐观判断，
+            # 即使限定词被改变，真实信号守卫仍须独立拦截，不能把该桩当成语义真值。
+            evidence = next(e for e in kwargs["user"]["evidence"] if e.get("evidence_id") == "e-title")
+            for item, candidate in zip(reply.data["reviews"], kwargs["user"]["candidate_titles"]):
+                title = candidate.get("rendered_title") or candidate["headline"]
+                source = evidence["text"]
+                item["gates"]["G3"].update(evidence_ids=["e-title"], delivery_supported=True, core_covered=True,
+                    promise_comparison={"title_promise": title, "trigger_span": title,
+                        "video_delivery": source, "evidence_excerpt": source,
+                        "evidence_answered_question": "原题描述什么", "alignment": "matched",
+                        "explanation": "测试专用乐观假设：隔离信号守卫，不代表实际语义匹配"})
         return reply
 
 
@@ -106,8 +118,8 @@ def test_rereview_recomputes_prefix_and_numbers_despite_forged_historical_pass(t
     assert state["route"]["action"] != "handoff"
 
 
-def test_rereview_reports_missing_prefix_as_warning_instead_of_failing_the_candidate(tmp_path):
-    """前缀缺失降级为 warning：仍然被重算出来，但不再把候选判死。"""
+def test_rereview_blocks_missing_required_prefix(tmp_path):
+    """重评必须重新发现并拦截缺失的强制标记。"""
     def forge_historical_pass(state):
         candidate = state["candidates"][0]
         candidate.update(headline="小店开业", prefix_labels=[], rendered_title="小店开业")
@@ -117,8 +129,8 @@ def test_rereview_reports_missing_prefix_as_warning_instead_of_failing_the_candi
 
     _, state = run_video(tmp_path, "本视频由AI生成", "小店开业", tamper=forge_historical_pass)
     checks = state["candidates"][0]["mechanical_checks"]
-    assert "G4_PREFIX_MISSING" not in {e["code"] for e in checks["errors"]}
-    assert "G4_PREFIX_MISSING" in {w["code"] for w in checks.get("warnings", [])}
+    assert "G4_PREFIX_MISSING" in {e["code"] for e in checks["errors"]}
+    assert checks["status"] == "fail"
 
 
 def test_title_only_control_requires_review(tmp_path):
@@ -177,16 +189,21 @@ def test_numeric_claim_cannot_bypass_boundary_with_invented_or_question_number(t
     assert state["candidates"] == []
 
 
-@pytest.mark.parametrize("source,headline,reason", [
-    ("部分人可能适用", "人人适用", "QUALIFIER_RETENTION_UNVERIFIED"),
-    ("今日小店开业", "今日小店开业", "RELATIVE_TIME_UNVERIFIED"),
+@pytest.mark.parametrize("source,headline,reason,expect_block", [
+    # 限定词表缺失只作观测（本批实测误拦人工可用标题），不再一票否决交付。
+    ("部分人可能适用", "人人适用", "QUALIFIER_RETENTION_UNVERIFIED", False),
+    ("今日小店开业", "今日小店开业", "RELATIVE_TIME_UNVERIFIED", True),
 ])
-def test_missing_qualifiers_and_historical_today_require_review(tmp_path, source, headline, reason):
+def test_missing_qualifiers_and_historical_today_require_review(tmp_path, source, headline, reason, expect_block):
     _, state = run_video(tmp_path, source, headline)
     assert state["candidates"][0]["mechanical_checks"]["status"] == "pass"
     review = state["reviews"][0]
     assert review["validation_errors"] == []
     assert reason in {item["code"] for item in review["signal_review_reasons"]}
-    assert review["decision"] == "needs_review"
-    assert state["candidate_decisions"][0]["reason"] == "SIGNAL_SEMANTICS_UNVERIFIED"
-    assert state["route"]["action"] == "needs_review"
+    if expect_block:
+        assert review["decision"] == "needs_review"
+        assert state["candidate_decisions"][0]["reason"] == "SIGNAL_SEMANTICS_UNVERIFIED"
+        assert state["route"]["action"] == "needs_review"
+    else:
+        # 观测标注保留在 signal_review_reasons，但不阻断交付
+        assert review["decision"] != "needs_review"

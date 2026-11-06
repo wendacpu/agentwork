@@ -1,5 +1,6 @@
 {
   "baseline_id": "baseline-20261104-机械层修复前",
+  "validity_warning": "历史统计草稿，非已核实正式基线；包含口径错误，不得直接用于对照或验收。详见 docs/baseline-20261104-口径勘误.md。", 
   "frozen_at": "2026-11-04T17:30:00+08:00",
   "batch": "runtime/v_eval_fixed_20261104",
   "video_set": "templates/validation_manifest.json (v2-20261104, 20 条, member_hash 583d62ec…)",

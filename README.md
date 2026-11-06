@@ -253,6 +253,16 @@ python3 -m agent_system.repairs group
 
 材料不足时另有输入质量闸：`data.py: assess_material` 按一手证据分 `high/medium/low`（ASR 段数 + OCR 中文占比），`low` 时路由强制降级为 `needs_review`（`INPUT_LOW_CONFIDENCE`），配置 `extra.stop_on_low_quality_input` 可直接停在 `INSUFFICIENT_MATERIAL`。理解节点同时记录 `source_evidence_usage`——有没有陈述引用 `quality=source` 的原题，避免把唯一一手文本丢掉。
 
+## 视频任务只读诊断台
+
+指定一个历史任务库启动独立入口：
+
+```bash
+python3 -m agent_system.diagnostic_server --db runtime/v_eval_fixed_20261104/agent.db --port 8766
+```
+
+浏览器打开终端显示的本机地址，选任务及候选，可查看视频主旨、候选评审与任务路由、素材引用和外部核查状态。快捷问题不调用模型；自由提问由本机 Ollama 的 `qwen3:latest` 回答，点击提交即同意所选任务的有限诊断信息与问题发送到本机 Ollama，不调用云端或联网搜索。本机需已安装并启动 Ollama 且已安装该模型；模型输出和引用须人工核对，引用 ID 存在不等于回答得到证据支持。未保存的信息会显示缺失；同一任务和候选的本次页面会话最多携带最近六条消息，切换任务、候选或刷新页面后清除；服务端不保存会话。仅以 SQLite 只读模式连接选定数据库，不启动生成、搜索核查或修改任务；活动 WAL 数据库可能由 SQLite 建立共享内存副文件，不承诺目录内绝无文件变化。不同批次需要重新指定任务库。此工具不能代替观看原片和人工核实。
+
 ## 单任务调试台
 
 运行 `python -m agent_system.cli debug`，然后在浏览器打开终端显示的本机地址（默认 `http://127.0.0.1:8765`）。调试台一次启动一条视频任务，页面先显示候选标题和人工判断，再展开流程、输入证据、规则和事件。人工评审只选择「可用 / 勉强通过 / 不可用」并说明标题瑕疵；点「驳回」时判定结果固定为不可用，只需选一个「驳回原因」（事实错误 / 关键背景缺失 / 没写到核心看点 / 句子不完整 / 用词读不懂 / 其他）并写一句话理由，原因与判据都可不填，由 AI 结合证据与流程记录归因。驳回原因会单独落到 `gold.csv` 的一列，便于统计主要失败类型。判定会同步写入 `templates/gold.csv`（按 video_id + candidate_id 覆盖）；已提交判定可撤回并重评，撤回会移除对应金标准行。`pending_human` 与 `stopped` 两种状态下的候选都可以判——重写耗尽而停下的任务里，候选同样是真实的。调试台默认扫描 `<output_dir>/*/agent.db` 下所有任务库（每次实验一个目录），需要指定时用 `--db-path`（可重复）。候选卡展示的是渲染后的完整标题（前缀 + 正文），字数按同一口径计算；编辑后通过时提交的也是完整串。Prompt 区展示 Prompt 组装记录、源文件常量和哈希，方便定位应该修改 `agent_system/prompts.py` 中的哪个节点；注入的规则正文可在规则区查看，对应源文件为 `rulepacks/*.md`。`mock` 模式下 Prompt 不会被大模型消费，候选只是确定性占位输出，不能用来判断 Prompt 效果。历史任务缺少 `prompt_snapshot` 时无法还原当时的完整输入。
@@ -277,11 +287,27 @@ python3 -m agent_system.batch_review --batch-dir runtime/acceptance_deepseek_202
 
 该模式只读原任务，判定与历史操作写本批 `human_feedback.db`，按任务、候选和完整标题哈希绑定；保留平台前缀、编辑稿、理由、判据与原系统路由。它不写全局 `templates/gold.csv`、不触发案例学习，也不重新调用模型。返回聊天说「我评完了」即可让 Agent 用 `--feedback` 或 `/api/feedback` 读取已落盘意见，无需复制编号和文字；页面保存不会主动向聊天推送消息。当前普通单任务调试台仍沿用原保存逻辑，此处隔离入口不代表旧链路审计问题已全部修复。
 
+## 服务化 MVP（近线队列 + 物料出口）
+
+`agent_system/service.py` 把流水线从「CLI 批处理、人盯进程」变成近线服务：入队 → worker 执行 → 物料写出。设计与出口判据见 `specs/serviceization-mvp/`（API/队列/物料契约见其 design.md）。
+
+```bash
+python3 -m agent_system.service --config config.mock-smoke.json --db runtime/service_demo/agent.db --workers 2
+```
+
+- `POST /tasks {video_id, source?, idempotency_key?}`：prepare 建任务并入队返回 202；幂等键重复返回原任务不新建；熔断或超日预算 429 拒收（不囤积）。
+- `GET /tasks/<id>` 任务终态 + 候选 + 队列状态；`GET /queue` backlog、熔断、预算、时延 p50/p95；`GET /materials?video_id=[&all=1]` 物料最新/全版本。
+- **`material_store` 是对外物料契约**（不是 agent.db 内部表的裸暴露）：每候选一行，三槽实名 `source_rewrite / core_summary / core_hook`，含渲染完整标题、交付态（recommended / not_recommended / needs_review / rejected / failed）、风险标（policy_hits、limit_pending、verification_risk、机检错误码）、评审摘要、版本指纹（规则/模型/Prompt 哈希）；同视频新任务写入时旧行自动 `superseded_by` 指向新任务，版本链只追加不覆盖。
+- 护栏：401/402/403/missing key 触发熔断（与 `scripts/run_acceptance.py` 同口径，不另造）；worker 停止领新任务但 backlog 保留，恢复用 `POST /admin/circuit {"reset":true}` 或重启；`--max-tasks-per-day`（默认 50）在入队闸门计数。
+- 崩溃恢复：启动时把队列 `running` 复位 `queued`，`Pipeline.execute` 走 checkpoint 续跑并复用已完成模型调用，重领不重复付费；task_queue / material_store / service_state / service_usage 四表与任务库同文件，不侵入 `storage.py`。
+
+边界（明示，不是实现遗漏）：单线程 HTTP（SQLite 连接绑定线程的约束，真并发在 worker 侧）；无鉴权、仅绑 127.0.0.1；熔断与预算为进程内状态；`running` 复位无租约/心跳。生产映射（MQ、k8s Job、内容中台物料库、服务间认证）属接入方案文档，不在 MVP 实现。回归见 `tests/test_service.py`：入队→终态→物料、幂等、预算闸、熔断、supersede 链、崩溃恢复、HTTP 环回。
+
 ## 目录结构
 
 | 路径 | 负责什么 | 会不会被改 |
 |---|---|---|
-| `agent_system/` | 主体代码：流水线（`pipeline.py`）、数据接入（`data.py`）、模型适配（`model.py`）、Prompt（`prompts.py`）、存储与人工判定（`storage.py`）、调试台（`debugger.py`）、报告（`report.py`） | 经常 |
+| `agent_system/` | 主体代码：流水线（`pipeline.py`）、数据接入（`data.py`）、模型适配（`model.py`）、Prompt（`prompts.py`）、存储与人工判定（`storage.py`）、调试台（`debugger.py`）、服务化 MVP（`service.py`）、报告（`report.py`） | 经常 |
 | `agent_system/rules/` | 规则模型、加载、领域/形态路由、Rubric | 偶尔（改规则优先级时） |
 | `agent_system/verification/` | 外部搜索核查 Agent：Provider（WSA）、品类路由与白名单、核查结果判定与风险汇总 | 偶尔 |
 | `rulepacks/` | 规则正文，按职责拆成 `common.md`（U 条通用）/ `domains.md`（V 条垂类）/ `forms.md`（F 条形态） | 业务知识变了才改 |

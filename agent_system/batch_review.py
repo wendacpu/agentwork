@@ -60,13 +60,16 @@ def _blocking_reasons(candidate):
     for err in checks.get("errors") or []:
         code = str(err.get("code") or "")
         out.append({"code": code, "text": REASON_TEXT.get(code, str(err.get("reason") or code))})
-    # 待核不是判否，但同样是「没交付」，评审人得知道该查哪一条限定、为什么机械层判不了。
-    # 不显示原因，评审台就只剩一个「待核」标签，等于让人重读整个状态。
-    for item in checks.get("limit_pending") or []:
-        limit = str(item.get("limit") or "")
-        reason = str(item.get("reason") or "限定需要人工确认")
-        out.append({"code": "G1_LIMIT_PENDING", "text": f"待核：{reason}｜要求：{limit}"})
     return out
+
+
+def _pending_limits(candidate):
+    """限定待核是复核线索，不是机械错误，也不能推断交付状态。"""
+    checks = candidate.get("mechanical_checks") or {}
+    return [{"claim_id": str(item.get("claim_id") or ""),
+             "limit": str(item.get("limit") or ""),
+             "reason": str(item.get("reason") or "限定需要人工确认")}
+            for item in checks.get("limit_pending") or [] if isinstance(item, dict)]
 
 
 def _length_excluded(item, state, candidate):
@@ -231,7 +234,7 @@ class BatchReviewStore:
                 route = state.get('route') or {}
                 # 系统判定缺失（R01 崩溃）时回落到冻结时记下的状态，
                 # 否则界面只能说「未知」，看不出这批候选到底经过评审没有。
-                status = ('recommended' if route.get('recommended_candidate_id') == cid
+                status = ('recommended' if route.get('recommended_candidate_id') == cid and route.get('action') in (None, '', 'handoff')
                           else (decision.get('status') or frozen.get('status') or 'unknown'))
                 reasons = _blocking_reasons(c)
                 out.append({'candidate_id': cid, 'rendered_title': rendered, 'title_hash': expected,
@@ -239,10 +242,11 @@ class BatchReviewStore:
                             'slot_id': str(c.get('slot_id') or ''), 'thesis_id': str(c.get('thesis_id') or ''),
                             'prefix_labels': list(c.get('prefix_labels') or []),
                             'title_length': len(rendered), 'blocking_reasons': reasons,
+                            'pending_limits': _pending_limits(c),
                             'generation': _rewrite_chain(state, c),
                             'claim_points': _claim_points(state, c),
                             'review_issues': _review_issues(state, cid),
-                            'deliverable': not reasons})
+                            'deliverable': route.get('recommended_candidate_id') == cid and route.get('action') in (None, '', 'handoff')})
             return out
         # 回退：单候选 mapping
         cid = item.get('candidate_id')
@@ -255,7 +259,13 @@ class BatchReviewStore:
                 return [{'candidate_id': cid, 'rendered_title': rendered,
                          'headline': str(candidate.get('headline') or rendered),
                          'slot_id': str(candidate.get('slot_id') or ''), 'thesis_id': '',
-                         'prefix_labels': list(candidate.get('prefix_labels') or [])}]
+                         'prefix_labels': list(candidate.get('prefix_labels') or []),
+                         'status': ('recommended' if ((state.get('route') or {}).get('recommended_candidate_id') == cid and (state.get('route') or {}).get('action') in (None, '', 'handoff'))
+                                    else next((d.get('status') for d in state.get('candidate_decisions') or []
+                                               if d.get('candidate_id') == cid), None) or item.get('status') or 'unknown'),
+                         'title_length': len(rendered), 'blocking_reasons': _blocking_reasons(candidate),
+                         'pending_limits': _pending_limits(candidate),
+                         'deliverable': ((state.get('route') or {}).get('recommended_candidate_id') == cid and (state.get('route') or {}).get('action') in (None, '', 'handoff'))}]
         return []
 
     def _legacy_decisions(self):
@@ -353,7 +363,7 @@ class BatchReviewStore:
                            'slot_id': str(c.get('slot_id') or ''),
                            'prefix_labels': list(c.get('prefix_labels') or []),
                            'generation_round': c.get('generation_round'), 'status': status,
-                           'blocking_reasons': reasons, 'codes': codes})
+                           'blocking_reasons': reasons, 'pending_limits': _pending_limits(c), 'codes': codes})
         return result
 
     def _diagnostic_candidate(self, item, state, frozen, candidate_id):
@@ -407,7 +417,7 @@ class BatchReviewStore:
                           'length_excluded_count': len(excluded),
                           'diagnostic_reviewed': diagnostic_done,
                           'source_status': item.get('task_status') or '',
-                          'blocked_count': sum(1 for c in candidates if not c.get('deliverable', True)),
+                          'blocked_count': sum(1 for c in candidates if c.get('blocking_reasons')),
                           'mechanical_dropped': list(item.get('mechanical_dropped') or []),
                           'contract_disagreement': state.get('contract_disagreement') or None,
                           'review_status': 'done' if candidates and done == len(candidates) else ('unreviewed' if candidates else 'no_candidates'),

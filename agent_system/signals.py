@@ -222,16 +222,9 @@ _COUNT_UNITS = frozenset({"个", "个", "碗", "招", "式", "套", "款", "条"
 
 
 def _unit_equivalent(left: str, right: str) -> bool:
-    """同一指标下，量词差别不算口径差别。
-
-    「九招」和「九个动作」数的是同一件事，只换了量词；旧实现要求量词字面相等，
-    于是把抄自原视频标题的数字判成「没有证据支持」。计数量词之间互通，
-    金额/时长/重量/距离/百分比仍按单位原样比——「400亿美元」写成「400亿」
-    是真丢了口径，必须继续拦。
-    """
-    if left == right:
-        return True
-    return left in _COUNT_UNITS and right in _COUNT_UNITS
+    """仅相同单位可参与匹配；不同量词是否同义需要语义核验。"""
+    # 量词相同仍不保证指向同一对象；不同量词更不能自动互认。
+    return left == right
 
 
 def unsupported_numeric_facts(headline: str, evidence_texts: list[str]) -> list[dict]:
@@ -241,21 +234,15 @@ def unsupported_numeric_facts(headline: str, evidence_texts: list[str]) -> list[
     不自动冒充已知总价或单价，不计算、补全或假定原题就是事实。
     量词等价只覆盖计数量词（个/招/式/套…），不跨指标、不跨金额口径。
 
-    模糊量词（value=None：约/数/几/将近…）只在证据里出现**同样模糊的同单位词**
-    时算支持。真实误伤（V 集 2026-11-04）：「每天持续数小时」在 claim 和证据里
-    是同一个词，但 value=None 永不匹配（且证据侧 role=unknown 被 assertion 过滤
-    掉），claim 被「数字证据守卫」整条 excluded，下游候选引用即
-    G4_INVALID_REFERENCE，三个候选白跑重写。
-    存在量词（一 + 人/物量词：一名幼童、一只猫）同理——它是「有个」不是
-    「数了几个」，不构成数量主张。
+    模糊量词无法确定数值、范围和证据角色时保守视为未确认；数量为一不能
+    自动豁免。未确认不等于事实错误，调用方应结合证据安排人工核验。
     """
     if isinstance(evidence_texts, str):
         evidence_texts = [evidence_texts]
     all_facts = [fact for text in evidence_texts for fact in numeric_facts(text)]
     evidence = [fact for fact in all_facts if fact["role"] == "assertion"]
     return [fact for fact in numeric_facts(headline)
-            if not _is_existential_quantifier(headline, fact)
-            and _numeric_fact_unsupported(fact, all_facts, evidence)]
+            if _numeric_fact_unsupported(fact, all_facts, evidence)]
 
 
 _EXISTENTIAL_UNITS = frozenset({
@@ -281,17 +268,9 @@ def _is_existential_quantifier(text: str, fact: dict) -> bool:
 
 def _numeric_fact_unsupported(fact: dict, all_facts: list[dict], assertions: list[dict]) -> bool:
     if fact.get("value") is None:
-        # 模糊量词（数/约/几…）：只被同样模糊且同单位的证据支持（用全量集——
-        # 模糊量词在证据里同样记 role=unknown，assertion 过滤会把它们全部丢掉，
-        # 「数小时」对「数小时」就成了无支持）。明确数值仍只认断言集：
-        # 「总价872元」不能被问句「总价872元吗？」支持。
-        # 「数亿年」对「3亿年」→ 不支持（模糊量级不能被明确数值隐式顶替，
-        # 见 test_approximate_numbers）。
-        return not any(
-            candidate.get("value") is None
-            and _unit_equivalent(fact["unit"], candidate["unit"])
-            for candidate in all_facts
-        )
+        # 解析器未保留模糊数值及其断言角色；同单位不足以证明相同数量或对象。
+        # 在能够可靠核验之前，保守地视为未确认，而不是自动放行。
+        return True
     return not any(
         fact["value"] == candidate["value"]
         and _unit_equivalent(fact["unit"], candidate["unit"])

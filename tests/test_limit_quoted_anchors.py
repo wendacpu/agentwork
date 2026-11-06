@@ -91,10 +91,12 @@ def test_pending_reason_is_groupable():
 
 def test_review_console_shows_pending_reason():
     """评审台只给一个「待核」标签等于让人重读状态，必须带上原因。"""
-    from agent_system.batch_review import _blocking_reasons
+    from agent_system.batch_review import _blocking_reasons, _pending_limits
 
-    reasons = _blocking_reasons({"mechanical_checks": {"errors": [], "limit_pending": [
-        {"claim_id": "c1", "limit": "须保留“约三分钟”", "reason": "标题未出现限定要求的落点：约三分钟"}]}})
-    assert len(reasons) == 1
-    assert reasons[0]["code"] == "G1_LIMIT_PENDING"
-    assert "约三分钟" in reasons[0]["text"] and "待核" in reasons[0]["text"]
+    candidate = {"mechanical_checks": {"errors": [], "limit_pending": [
+        {"claim_id": "c1", "limit": "须保留“约三分钟”", "reason": "标题未出现限定要求的落点：约三分钟"}]}}
+    assert _blocking_reasons(candidate) == []
+    pending = _pending_limits(candidate)
+    assert len(pending) == 1
+    assert pending[0]["claim_id"] == "c1"
+    assert "约三分钟" in pending[0]["reason"] and "约三分钟" in pending[0]["limit"]

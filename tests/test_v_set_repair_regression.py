@@ -18,10 +18,12 @@ from agent_system.signals import unsupported_numeric_facts
 
 # --- 1. 数字守卫（V 集实测：幼童 c1、下颌 c7 被误排除 → 候选白跑重写） ---
 
-def test_fuzzy_quantifier_supported_by_same_word():
-    """「数小时」对证据「数小时」→ 支持。旧实现 value=None 永不匹配，
-    supported 的 claim 被整条 excluded（人体科学视频实况）。"""
-    assert unsupported_numeric_facts("每天持续数小时托头", ["每天持续数小时托头"]) == []
+def test_fuzzy_quantifier_remains_unverified():
+    """解析器无法区分问句、数量级与主体时，不把同单位自动当作证据支持。"""
+    assert unsupported_numeric_facts("每天持续数小时托头", ["每天持续数小时托头"])
+    assert unsupported_numeric_facts("数小时", ["持续数小时吗？"])
+    assert unsupported_numeric_facts("约3年", ["约9年"])
+    assert unsupported_numeric_facts("数亿年", ["数十年"])
 
 
 def test_fuzzy_quantifier_not_replaced_by_exact_number():
@@ -33,9 +35,11 @@ def test_fuzzy_quantifier_without_evidence_stays_unsupported():
     assert unsupported_numeric_facts("需要几个字", [])
 
 
-def test_existential_quantifier_is_not_a_count_claim():
-    """「一名幼童」是存在描述不是数量主张——幼童任务 c1 因它被误排除。"""
-    assert unsupported_numeric_facts("视频中一名幼童坐在餐椅上吃午餐", ["OCR:鸡腿 排骨汤 西兰花 饭团"]) == []
+def test_single_person_claim_is_not_blanket_exempted():
+    """数量一可能是事实主张，缺少支持时不能一律豁免。"""
+    assert unsupported_numeric_facts("视频中一名幼童坐在餐椅上吃午餐", ["OCR:鸡腿 排骨汤"])
+    assert unsupported_numeric_facts("1人死亡", ["无人死亡"])
+    assert unsupported_numeric_facts("3招", ["3瓶"])
 
 
 def test_count_claims_still_require_evidence():

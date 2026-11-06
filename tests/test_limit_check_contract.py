@@ -122,6 +122,61 @@ def test_violated_verdict_forces_g1_revise():
     assert decision["gates"]["G1"]["status"] == "revise"
 
 
+def test_conflicting_duplicate_verdicts_never_auto_pass():
+    mechanical = _mechanical_with_requirements("须注明未经证实")
+    checks = [{"claim_id": "c1", "limit": "须注明未经证实", "verdict": v, "reason": "r"}
+              for v in ("violated", "satisfied", "satisfied")]
+    decision = _decide_candidate(_review(g1_status="pass", limit_checks=checks), mechanical, schema_errors=[], business_policy={})
+    assert decision["gates"]["G1"]["status"] == "needs_review"
+
+
+def test_violated_limit_does_not_weaken_existing_reject():
+    mechanical = _mechanical_with_requirements("须注明未经证实")
+    review = _review(g1_status="reject", limit_checks=[
+        {"claim_id": "c1", "limit": "须注明未经证实", "verdict": "violated", "reason": "r"}])
+    decision = _decide_candidate(review, mechanical, schema_errors=[], business_policy={})
+    assert decision["gates"]["G1"]["status"] == "reject"
+
+
+def test_violated_and_unclear_preserve_both_and_require_review():
+    mechanical = _mechanical_with_requirements("限定一", "限定二")
+    checks = [{"claim_id": "c1", "limit": limit, "verdict": verdict, "reason": "r"}
+              for limit, verdict in (("限定一", "violated"), ("限定二", "unclear"))]
+    policy = {"status": "approved", "rules": [{"rule_id": "P1"}]}
+    decision = _decide_candidate(_review(limit_checks=checks), mechanical, schema_errors=[], business_policy=policy)
+    assert decision["status"] == "needs_review"
+    assert decision["gates"]["G1"]["status"] == "needs_review"
+    assert [(x["limit"], x["verdict"]) for x in decision["gates"]["G1"]["limit_checks"]] == [
+        ("限定一", "violated"), ("限定二", "unclear")]
+
+
+def test_limit_results_preserve_existing_gate_status_and_reason():
+    mechanical = _mechanical_with_requirements("限定一", "限定二")
+    checks = [{"claim_id": "c1", "limit": limit, "verdict": verdict, "reason": "r"}
+              for limit, verdict in (("限定一", "violated"), ("限定二", "unclear"))]
+    for status in ("reject", "needs_review"):
+        decision = _decide_candidate(_review(g1_status=status, limit_checks=checks), mechanical,
+                                     schema_errors=[], business_policy={})
+        gate = decision["gates"]["G1"]
+        assert (gate["status"], gate["reason"]) == (status, "x")
+        assert {x["verdict"] for x in gate["limit_checks"]} == {"violated", "unclear"}
+
+
+def test_duplicate_verdict_conflicts_are_order_independent():
+    from itertools import permutations
+    from agent_system.pipeline import _limit_check_verdicts
+
+    for verdicts in (("satisfied", "violated", "violated"),
+                     ("satisfied", "unclear", "satisfied"),
+                     ("violated", "unclear", "violated")):
+        for ordered in permutations(verdicts):
+            checks = [{"claim_id": "c1", "limit": "限定一", "verdict": v} for v in ordered]
+            assert _limit_check_verdicts(_review(limit_checks=checks)) == {("c1", "限定一"): "unclear"}
+    for verdict in ("satisfied", "violated", "unclear"):
+        checks = [{"claim_id": "c1", "limit": "限定一", "verdict": verdict}] * 2
+        assert _limit_check_verdicts(_review(limit_checks=checks)) == {("c1", "限定一"): verdict}
+
+
 def test_unclear_verdict_downgrades_g1_to_needs_review():
     mechanical = _mechanical_with_requirements("须注明未经证实")
     review = _review(g1_status="pass", limit_checks=[

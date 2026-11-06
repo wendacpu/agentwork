@@ -22,6 +22,7 @@ from agent_system.pipeline import Pipeline
 from agent_system.storage import Storage
 from agent_system.goldsheet import record as record_gold, remove as remove_gold
 from agent_system.types import CaseRecord
+from g3_test_helpers import EvidenceReviewAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLE = ROOT / "data" / "source" / "video_dataset.json"
@@ -103,7 +104,9 @@ class WiringTests(unittest.TestCase):
         self.assertTrue(state["verification_tasks"])
 
     def test_g3_issue_switches_rewrite_to_highlight_mode(self):
-        class G3Adapter(MockAdapter):
+        class G3Adapter(EvidenceReviewAdapter):
+            mismatch_first = True
+
             def __init__(self):
                 self.review_calls = 0
 
@@ -118,7 +121,7 @@ class WiringTests(unittest.TestCase):
                             # 「写的是边角内容」= 标题主看点视频没有 = delivery_supported=False
                             # （真实 R01 按 schema 必填该布尔），属 G3 硬伤走换看点重写；
                             # 仅覆盖不全（delivery_supported=True）的软 revise 才交人审。
-                            item["gates"]["G3"] = {"status": "revise", "reason": "主看点缺失", "evidence_ids": [], "rule_ids": [], "delivery_supported": False, "core_covered": False}
+                            item["gates"]["G3"].update(status="revise", reason="人数与通报不符", delivery_supported=False, core_covered=False)
                             item["issues"] = [{"issue_id": f'{item["candidate_id"]}-G3_CORE_POINT_OMITTED', "primary_dimension": "G3",
                                                "issue_code": "G3_CORE_POINT_OMITTED", "severity": "high", "repairable": True,
                                                "problem_span": "标题", "evidence_ids": [], "rule_ids": [],
@@ -136,7 +139,7 @@ class WiringTests(unittest.TestCase):
         self.assertTrue(any(e["event_type"] == "highlight_reselected" for e in self._events(task_id)))
 
     def test_rewrite_records_resolved_and_repeated_issues(self):
-        class RepeatAdapter(MockAdapter):
+        class RepeatAdapter(EvidenceReviewAdapter):
             """第二轮仍只修掉一半问题，用来验证 resolved / repeated 都能记录。"""
 
             def __init__(self):
@@ -177,7 +180,7 @@ class WiringTests(unittest.TestCase):
         self.assertTrue(first["child_candidate_ids"])
 
     def test_all_rewritable_candidates_are_rewritten(self):
-        class AllBadAdapter(MockAdapter):
+        class AllBadAdapter(EvidenceReviewAdapter):
             def complete(self, **kwargs):
                 if kwargs["task"] == "review":
                     reply = super().complete(**kwargs)

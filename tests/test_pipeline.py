@@ -16,6 +16,7 @@ from agent_system.schemas import validate_review
 from agent_system.storage import Storage
 from agent_system.memory import MemoryStore
 from agent_system.types import CaseRecord, Claim, Understanding
+from g3_test_helpers import EvidenceReviewAdapter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,7 +187,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(store.search("low_density", ["low_density"], "temporary-v1")), 1)
 
     def test_failed_first_review_triggers_bounded_rewrite(self):
-        class RepairAdapter(MockAdapter):
+        class RepairAdapter(EvidenceReviewAdapter):
+            mismatch_first = True
+
             def __init__(self): self.review_calls = 0
             def complete(self, **kwargs):
                 if kwargs["task"] == "review":
@@ -195,14 +198,11 @@ class PipelineTests(unittest.TestCase):
                     evidence_ids = [item["evidence_id"] for item in kwargs["user"].get("evidence", []) if item.get("evidence_id")]
                     for item in reply.data["reviews"]:
                         item["gates"]["G1"]["evidence_ids"] = evidence_ids[:1]
-                        item["gates"]["G3"]["evidence_ids"] = evidence_ids[:1]
                         item["gates"]["G2"]["rule_ids"] = ["P1"]
                         if self.review_calls == 1:
-                            # 真实 R01 按 schema 必填 delivery_supported/core_covered；
-                            # OVER_PROMISE（承诺超出视频交付）即 delivery_supported=False，
-                            # 属 G3 硬伤，必须走重写而不是人审。
-                            item["gates"]["G3"] = {"status": "revise", "reason": "看点承诺偏宽", "evidence_ids": [], "rule_ids": [], "delivery_supported": False, "core_covered": True}
-                            item["issues"] = [{"issue_id": f'{item["candidate_id"]}-G3_OVER_PROMISE', "primary_dimension": "G3", "issue_code": "G3_OVER_PROMISE", "severity": "medium", "repairable": True, "problem_span": "标题承诺", "evidence_ids": [], "rule_ids": [], "reason": "承诺超出视频交付", "action": "收窄承诺"}]
+                            # 首轮标题称79人，原题称78人，模拟真实的人数错配。
+                            item["gates"]["G3"].update(status="revise", reason="人数与通报不符", delivery_supported=False, core_covered=True)
+                            item["issues"] = [{"issue_id": f'{item["candidate_id"]}-G3_OVER_PROMISE', "primary_dimension": "G3", "issue_code": "G3_OVER_PROMISE", "severity": "medium", "repairable": True, "problem_span": "79名学生", "evidence_ids": ["e-title"], "rule_ids": [], "reason": "标题人数与原题通报不符", "action": "改为通报中的人数"}]
                     return reply
                 return super().complete(**kwargs)
         self.config.extra["business_policy"] = {"status": "approved", "version": "test-v1", "rules": [{"rule_id": "P1", "text": "测试规则"}]}

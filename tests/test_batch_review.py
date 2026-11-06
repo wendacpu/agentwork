@@ -22,6 +22,20 @@ def _hash(title: str) -> str:
     return hashlib.sha256(title.encode("utf-8")).hexdigest()
 
 
+def test_legacy_candidate_pending_and_route(batch):
+    batch_dir, states = batch
+    candidate = states['task-01']['candidates'][1]
+    candidate['mechanical_checks'] = {'errors': [], 'limit_pending': [
+        {'claim_id': 'c1', 'limit': '带限定', 'reason': '词法未识别'}]}
+    states['task-01']['route'] = {'action': 'needs_review', 'recommended_candidate_id': None}
+    states['task-01']['candidate_decisions'][0]['status'] = 'ready_for_human_review'
+    store = BatchReviewStore(batch_dir)
+    c = store._candidates(store.by_task['task-01'], states['task-01'])[0]
+    assert c['status'] == 'ready_for_human_review' and not c['deliverable']
+    assert c['blocking_reasons'] == [] and c['pending_limits'][0]['limit'] == '带限定'
+    assert store.record_decision(_body())['status'] == 'saved'
+
+
 def test_stale_title_hash_is_rejected(batch):
     store = BatchReviewStore(batch[0])
     with pytest.raises(ValueError, match='哈希不一致'):
@@ -706,7 +720,9 @@ function element(id) {
 }
 const tasks = [{task_id:'a', blind_id:'R1', category:'测试', title:'标题', review_status:'unreviewed',
   candidate_count:1, diagnostic_count:2, diagnostic_reviewed:0, decision:null}];
-const candidates = [{candidate_id:'c0', title_hash:'h0', rendered_title:'冻结标题', decision:null}];
+const candidates = [{candidate_id:'c0', title_hash:'h0', rendered_title:'冻结标题', decision:null,
+  status:'ready_for_human_review', deliverable:false, blocking_reasons:[],
+  pending_limits:[{claim_id:'c1', reason:'词法未识别', limit:'限定<script>'}]}];
 const diagnostics = [
   {candidate_id:'d0', title_hash:'dh0', rendered_title:'诊断标题一', slot_id:'core_hook', status:'rewrite',
    blocking_reasons:[{code:'G1_MISSING_LIMIT', text:'缺限定'}], codes:[], decision:null},
@@ -731,6 +747,11 @@ vm.createContext(context);
 vm.runInContext(page, context);
 (async()=>{
   await vm.runInContext("refresh(); openTask('a')", context);
+  assert.match(element('content').innerHTML, /限定初步词法待核信号（不是机械判否，可能已由评审确认）/);
+  assert.match(element('content').innerHTML, /限定&lt;script&gt;/);
+  assert.match(element('content').innerHTML, /系统通过，待人工评审/);
+  assert.doesNotMatch(element('content').innerHTML, /机械检查判否，未交付/);
+  assert.match(element('content').innerHTML, /G1_MISSING_LIMIT｜缺限定/);
   assert.match(element('content').innerHTML, /超长失败轨迹（只读）/);
   assert.match(element('content').innerHTML, /历史人工意见（只读）：不可用 历史意见/);
   assert.match(element('content').innerHTML, /未交付槽位：核心钩子/);

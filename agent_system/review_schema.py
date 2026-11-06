@@ -8,9 +8,8 @@ JSON，整批评审随之作废，三个候选一起丢。
 本模块把同一份约束前移到解码器：让不允许的 token 在采样前就被屏蔽，而不是
 生成完再判死。
 
-字段严格对齐 `agent_system/pipeline.py::_review_batch_structure_error` 的实际
-检查项；G3 的 `delivery_supported` / `core_covered` / `promise_comparison` 虽不在
-结构校验里，但提示词要求模型输出且下游要用，因此一并纳入必填。
+批量结构检查之外，新评审还逐候选检查 G3 的 `delivery_supported`、
+`core_covered` 和 `promise_comparison`，并核验摘录确实来自引用证据。
 
 注意：这份 schema 只约束**结构**。事实是否成立、证据有没有编造、该判 pass 还是
 revise，仍然要靠规则与人工，不能因为结构合法就认为语义正确。

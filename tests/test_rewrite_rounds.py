@@ -15,13 +15,14 @@ from agent_system.data import Dataset
 from agent_system.model import MockAdapter
 from agent_system.pipeline import Pipeline
 from agent_system.storage import Storage
+from g3_test_helpers import EvidenceReviewAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLE = ROOT / "data" / "source" / "video_dataset.json"
 ASSETS = Path("/Users/wanting/program/新项目/复杂agent/recent-portrait-100")
 
 
-class _RewriteAdapter(MockAdapter):
+class _RewriteAdapter(EvidenceReviewAdapter):
     """重写一律不写 slot_id；第二轮与第一轮输出完全相同。"""
 
     def __init__(self):
@@ -35,7 +36,7 @@ class _RewriteAdapter(MockAdapter):
             for item in reply.data["candidates"]:
                 item.pop("slot_id", None)
                 # 第 2 轮及以上：与第 1 轮逐字相同，模拟"根本没改"
-                item["headline"] = f"重写标题第{1 if round_no > 1 else round_no}版{kwargs['user'].get('parent_candidate_id', '')[-1]}"
+                # 辅助适配器为每个父候选提供有原题依据的固定标题，跨轮不变。
             return reply
         if kwargs["task"] == "review":
             reply = super().complete(**kwargs)
@@ -93,7 +94,7 @@ class RewriteRoundTests(unittest.TestCase):
                                "REWRITE_PRODUCED_NO_CANDIDATE", "PENDING_VERIFICATION", None})
 
 
-class _PartialReviewAdapter(MockAdapter):
+class _PartialReviewAdapter(EvidenceReviewAdapter):
     """重写产出三条，评审只回两条：第三条落成待核实，不该连累前两条。"""
 
     def __init__(self):
@@ -104,11 +105,11 @@ class _PartialReviewAdapter(MockAdapter):
             reply = super().complete(**kwargs)
             base = reply.data["candidates"][0]
             # 换掉句尾策略词，保持正文长度与内容有效，同时避开首轮那三个策略词
-            tails = ["做法要点", "操作步骤", "日常吃法"]
+            titles = ["官方通报共涉及78名学生", "通报称共涉及78名学生", "共涉及78名学生的通报"]
             out = []
-            for tail in tails:
+            for title in titles:
                 c = dict(base)
-                c["headline"] = base["headline"][:-4] + tail
+                c["headline"] = title
                 out.append(c)
             reply.data["candidates"] = out
             return reply

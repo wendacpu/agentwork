@@ -846,7 +846,11 @@ def _apply_numeric_conflict_gate(video: Any, understanding: Any, boundary: Any) 
         decision = decisions.get(claim.claim_id)
         if _foreign_evidence_ratio(refs) > 0.5:
             if decision is not None and decision.decision in {"usable", "limited"}:
-                decision.reason = (decision.reason or "") + " | 数字证据守卫跳过：证据为外文，跨语言无法词法核验"
+                # 无法词法核验不是数字已获支持；保留为待核，禁止进入自动可写集合。
+                if unsupported_numeric_facts(claim.text, refs):
+                    decision.decision = "limited"
+                    decision.verification_required = True
+                    decision.reason = (decision.reason or "") + " | 跨语言数字证据无法词法核验，须人工核实"
             continue
         unsupported = unsupported_numeric_facts(claim.text, refs)
         if not unsupported or decision is None or decision.decision not in {"usable", "limited"}:
@@ -1224,6 +1228,27 @@ def _apply_verification_constraints(
 def _title_key(text: Any) -> str:
     """比较标题是否重复用的归一化键：去掉标点、空白、大小写差异。"""
     return re.sub(r"[^\w\u4e00-\u9fff]", "", str(text or "")).lower()
+
+
+def _rewrite_structure_error(raw: dict[str, Any]) -> str | None:
+    """空候选合法；非空候选必须含可用标题，避免归一化时静默丢失。"""
+    for key in ("AgentDraft", "agent_draft", "output"):
+        if isinstance(raw.get(key), dict):
+            raw = raw[key]
+    items = raw.get("candidates")
+    if not items and isinstance(raw.get("items"), list):
+        items = raw["items"]
+    if not items and isinstance(raw.get("drafts"), list):
+        items = raw["drafts"]
+    if not isinstance(items, list):
+        return "candidates must be a list"
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            return f"candidates[{index}] must be an object"
+        headline = next((item.get(key) for key in ("headline", "candidate_title", "title_text", "title", "copy", "draft_text", "text") if item.get(key)), None)
+        if not isinstance(headline, str) or not headline.strip():
+            return f"candidates[{index}] headline must be a non-empty string"
+    return None
 
 
 def _normalize_candidates(raw: dict[str, Any], rewrite_round: int, parent_id: str | None, required_prefixes: list[str] | None = None) -> list[dict[str, Any]]:
@@ -2013,7 +2038,12 @@ def _limit_check_verdicts(review: Any) -> dict[tuple[str, str], str]:
             continue
         verdict = str(item.get("verdict") or "")
         if verdict in {"satisfied", "violated", "unclear"}:
-            verdicts[_limit_key(item)] = verdict
+            key = _limit_key(item)
+            # 同一限定出现冲突判定时不能让末项覆盖前项并放行。
+            if key not in verdicts:
+                verdicts[key] = verdict
+            elif verdicts[key] != verdict:
+                verdicts[key] = "unclear"
     return verdicts
 
 
@@ -2314,11 +2344,16 @@ _META_PHRASE_RE = re.compile(
     r"|据(?:视频|画面|标题|封面|原题|字幕|片子|旁白|口播)"
     r"|作者称"
 )
-# 制作者动作：把博主的剪辑/制作行为或制作者身份写进标题（V 集人工 rejected 2 条的
-# 语义规则：博主是制作者不是场面见证人）。注意与合格写法的边界——
+# 制作者动作：把博主的剪辑/制作行为或制作者身份写进标题（V 集人工 rejected 2 条、
+# 同任务复测又 2 条同理由拒绝——「制作者放进标题感觉怪」「博主自评封神很奇怪」，
+# 人工同类证据 4 条，唯一 approved 反例是「博主：X合集」归属前缀）。注意边界：
 # 「博主：X合集」（approved）是归属前缀 + 内容宾语，不在此列；
-# 「博主把X剪成合集」「博主合集：X」（rejected）把制作动作/身份摆进了正文。
-_CREATOR_ACTION_RE = re.compile(r"博主.{0,12}?(?:剪成|剪出|剪了|剪辑成?|把.{0,16}剪)|^博主(?:合集|剪辑)[:：]?")
+# 「博主把X剪成合集」「博主合集：X」「博主自评」（rejected）把制作动作/身份摆进正文。
+_CREATOR_ACTION_RE = re.compile(
+    r"博主.{0,12}?(?:剪成|剪出|剪了|剪辑成?|把.{0,16}剪)"
+    r"|^博主(?:合集|剪辑)[:：]?"
+    r"|博主自评"
+)
 # 校验结论：标题写「与…不符/不一致」是评审层的话，不该出现在成品标题。
 _VERIFICATION_CONCLUSION_RE = re.compile(r"与[^，。！？]{0,12}(?:不符|不一致)")
 # 归属线索词：出现任一即视为标题已给出「这是谁的观察/演示」的信号。
@@ -2480,7 +2515,7 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     # 它只在有人绕过归一化手搓状态时才有意义，因此降级为 warning：留观测，不阻断交付。
     missing_prefixes = [label for label in required if label not in prefix_labels]
     if missing_prefixes:
-        warnings.append({"code": "G4_PREFIX_MISSING", "reason": f"候选未携带必填前缀：{'、'.join(missing_prefixes)}（正常路径不可达，出现即说明有人绕过了前缀归一化）"})
+        errors.append({"code": "G4_PREFIX_MISSING", "repairable": True, "reason": f"候选未携带必填前缀：{'、'.join(missing_prefixes)}"})
     if body_budget(max_chars, required) < MIN_BODY_BUDGET:
         errors.append({"code": "G4_PREFIX_BUDGET_EXHAUSTED", "repairable": False, "reason": f"前缀占用 {len(render_labels(required))} 字，正文预算不足，需要业务决策而非改标题"})
     if not candidate.get("candidate_id") or not candidate.get("claim_ids") or not candidate.get("evidence_ids"):
@@ -2509,12 +2544,11 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     if meta_hit:
         errors.append({"code": "G4_META_PHRASE", "repairable": True, "reason": f"标题含元信息表述「{meta_hit.group(0)}」，应直接陈述视频内容而非描述视频/画面怎么说"})
     # 制作者动作：博主是视频的制作者，不是场面的当事人或见证人。V 集人工
-    # rejected 2 条同理由（「博主把钓鱼圈稀奇古怪片段剪成合集」「博主合集：钓鱼圈
-    # 那些稀奇古怪场面」），而「博主：钓鱼圈稀奇古怪片段合集」判 approved——
-    # 区别在「剪成/合集：」把制作动作或制作者身份摆进了标题。
+    # rejected 2 条 + 复测再 2 条同理由（含「博主自评」），同类证据 4 条；
+    # 唯一 approved 反例「博主：X合集」是归属前缀，不在词形内。恢复硬拦截。
     creator_hit = _CREATOR_ACTION_RE.search(head_body)
     if creator_hit:
-        errors.append({"code": "G4_CREATOR_PERSPECTIVE", "repairable": True, "reason": f"标题把博主的制作者身份/剪辑动作写进正文「{creator_hit.group(0)}」；博主是视频制作者不是场面见证人，应直接陈述内容（如「博主：X合集」）"})
+        errors.append({"code": "G4_CREATOR_PERSPECTIVE", "repairable": True, "reason": f"标题把博主的制作者身份/剪辑/自评动作写进正文「{creator_hit.group(0)}」；博主是视频制作者不是场面见证人，应直接陈述内容（如「博主：X合集」）"})
     # 校验结论：标题不能写「与…不符/不一致」这类审核判断
     verify_hit = _VERIFICATION_CONCLUSION_RE.search(head_body)
     if verify_hit:
@@ -2633,6 +2667,16 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
             if disputed and not any(p in head_body for p in DISPUTE_MARK_PHRASES):
                 codes = "、".join(str(getattr(d, "claim_id", "")) for d in disputed)
                 errors.append({"code": "G1_MISSING_DISPUTE_MARK", "repairable": True, "reason": f"标题引用了存在外部反驳的陈述（{codes}），但未标明争议；须写「存在争议/未经证实/说法不一」等，或改用其他陈述"})
+    # 条件约束也是待评义务，不能仅登记在 limit_pending 后被决策层忽略。
+    # 是否触发交给语义评审，不能因字面关键词缺失就静默视为不适用。
+    for d in claim_decisions or []:
+        cid = str(getattr(d, "claim_id", ""))
+        if cid not in {str(x) for x in (candidate.get("claim_ids") or [])}:
+            continue
+        for constraint in getattr(d, "conditional_constraints", None) or []:
+            item = {"claim_id": cid, "limit": str(constraint)}
+            if item not in limit_requirements:
+                limit_requirements.append(item)
     if candidate.get("self_declared_prefixes"):
         warnings.append({"code": "G4_PREFIX_SELF_DECLARED", "reason": f"模型自报非必填前缀：{'、'.join(candidate['self_declared_prefixes'])}（已保留，仅观测）"})
     if head_body.startswith(("【", "[")):
@@ -2849,6 +2893,46 @@ def _g3_hard_failure(g3: Any) -> bool:
     return isinstance(comparison, dict) and comparison.get("alignment") == "mismatched"
 
 
+def _fresh_g3_comparison_errors(review: dict[str, Any], candidate: dict[str, Any], evidence: list[Any]) -> list[str]:
+    """只核对形式与摘录来源，不以文本匹配替代语义判断。"""
+    gates = review.get("gates")
+    g3 = gates.get("G3") if isinstance(gates, dict) else None
+    comparison = g3.get("promise_comparison") if isinstance(g3, dict) else None
+    if not isinstance(comparison, dict):
+        return ["G3 promise_comparison missing or invalid"]
+    errors = []
+    for field in ("delivery_supported", "core_covered"):
+        if not isinstance(g3.get(field), bool):
+            errors.append(f"G3 {field} missing or invalid")
+    for field in ("title_promise", "trigger_span", "video_delivery", "evidence_excerpt", "evidence_answered_question", "explanation"):
+        if not isinstance(comparison.get(field), str) or not comparison[field].strip():
+            errors.append(f"G3 promise_comparison.{field} missing or empty")
+    if comparison.get("alignment") not in {"matched", "mismatched", "uncertain"}:
+        errors.append("G3 promise_comparison.alignment missing or invalid")
+    span = comparison.get("trigger_span")
+    if isinstance(span, str) and span.strip() and span.strip() not in str(candidate.get("rendered_title") or candidate.get("headline") or ""):
+        errors.append("G3 trigger_span is not present in candidate headline")
+    excerpt = comparison.get("evidence_excerpt")
+    if isinstance(excerpt, str) and excerpt.strip():
+        refs = g3.get("evidence_ids") if isinstance(g3.get("evidence_ids"), list) else []
+        texts = [getattr(e, "text", "") for e in evidence if getattr(e, "evidence_id", None) in refs]
+        if not any(isinstance(text, str) and excerpt.strip() in text for text in texts):
+            errors.append("G3 evidence_excerpt not found in cited evidence text")
+    return errors
+
+
+def _explicit_policy_rejection(review: dict[str, Any], policy: dict[str, Any]) -> bool:
+    if policy.get("status") != "approved":
+        return False
+    gates = review.get("gates")
+    g2 = gates.get("G2") if isinstance(gates, dict) else None
+    if not isinstance(g2, dict) or g2.get("status") not in {"reject", "revise", "needs_review"}:
+        return False
+    ids = [str(x) for x in (g2.get("rule_ids") or [])]
+    known = {str(r.get("rule_id")) for r in policy.get("rules", []) if isinstance(r, dict)}
+    return _policy_action(ids, policy) == "reject" or (g2.get("status") == "reject" and bool(known.intersection(ids)))
+
+
 def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, schema_errors: list[str], business_policy: dict[str, Any]) -> dict[str, Any]:
     gates = dict(review.get("gates")) if isinstance(review.get("gates"), dict) else {}
     issues = list(review.get("issues")) if isinstance(review.get("issues"), list) else []
@@ -2891,29 +2975,26 @@ def _decide_candidate(review: dict[str, Any], mechanical: dict[str, Any], *, sch
         violated = [r for r in requirements if checks.get(_limit_key(r)) == "violated"]
         unclear = [r for r in requirements if checks.get(_limit_key(r)) not in {"satisfied", "violated"}]
         g1 = dict(gates.get('G1') or {})
-        if violated:
-            g1['status'] = 'revise'
-            g1['reason'] = "标题未满足限定：" + "；".join(str(r.get("limit"))[:60] for r in violated)
-            g1['limit_checks'] = [dict(r, verdict="violated") for r in violated]
+        if violated or unclear:
+            # 未决限定优先于可重写的违反；原有拒绝或待核结论及理由不能被降级。
+            if g1.get('status') not in {'reject', 'needs_review'}:
+                if unclear:
+                    g1['status'] = 'needs_review'
+                    g1['reason'] = "限定判定不明确或缺失，需人工核实"
+                else:
+                    g1['status'] = 'revise'
+                    g1['reason'] = "标题未满足限定：" + "；".join(str(r.get("limit"))[:60] for r in violated)
+            g1['limit_checks'] = ([dict(r, verdict="violated") for r in violated]
+                                  + [dict(r, verdict="unclear") for r in unclear])
             gates['G1'] = g1
-        elif unclear and g1.get('status') not in {'reject', 'needs_review'}:
-            g1['status'] = 'needs_review'
-            g1['reason'] = "限定缺少评审判定，需人工核实"
-            g1['limit_checks'] = [dict(r, verdict="unclear") for r in unclear]
-            gates['G1'] = g1
-    # 暂缓核验/已排除陈述的引用：不烧重写、不放行自动交付，交人工核实。
-    # 旧契约把它当 G4_INVALID_REFERENCE（repairable）→ rewrite 循环：V 集 6 条全走重写，
-    # 每条白烧 1 次生成 + 1 次评审，人工最终 5/6 判可用。verification_required 的字面
-    # 语义本来就是「主张需人工核实」——评审判 G1 pass 只说明归属规范，不说明主张
-    # 被核实过。所以压 needs_review（人工成本）而非 rewrite（金钱成本）。
+    # 暂缓核验引用不再由程序一票否决：评审已看到 blocked_claims 清单，
+    # G1 pass 表示它确认标题没有把未核实主张写成断言；G1 unclear/revise/reject
+    # 仍按 gate 走。blocked_claim_refs 保留在 gates 里供人工追溯。
     blocked_refs = [x for x in (mechanical.get("blocked_claim_refs") or []) if isinstance(x, str)]
     if blocked_refs:
         g1 = dict(gates.get('G1') or {})
-        if g1.get('status') == 'pass':
-            g1['status'] = 'needs_review'
-            g1['reason'] = "标题绑定了暂缓核验的陈述（" + "、".join(blocked_refs) + "），需人工确认是否写成断言"
-            g1['blocked_claim_refs'] = blocked_refs
-            gates['G1'] = g1
+        g1['blocked_claim_refs'] = blocked_refs
+        gates['G1'] = g1
     if business_policy.get("status") != "approved" or not business_policy.get("rules"):
         gates["G2"] = {"status": "needs_review", "reason": "缺少已批准的业务安全规则", "rule_ids": []}
     _merge_program_policy_hits(gates, mechanical)
@@ -3105,8 +3186,13 @@ class Pipeline:
         })
         candidate_ids = [str(c.get("candidate_id") or "") for c in user.get("candidate_titles", [])] if name == "review" and schema == "ReviewResultBatch" else None
         cached = self.storage.cached_model_reply(task_id, request_hash)
-        if cached is not None and candidate_ids is not None:
-            error = _review_batch_structure_error(cached, candidate_ids) if isinstance(cached, dict) else "cached reply must be an object"
+        if cached is not None and (candidate_ids is not None or name == "rewrite"):
+            if not isinstance(cached, dict):
+                error = "cached reply must be an object"
+            elif candidate_ids is not None:
+                error = _review_batch_structure_error(cached, candidate_ids)
+            else:
+                error = _rewrite_structure_error(cached)
             if error:
                 self.storage.event(task_id, node, "model_cache_invalid", {"task": name, "request_hash": request_hash, "error": error})
                 cached = None
@@ -3130,15 +3216,16 @@ class Pipeline:
             try:
                 reply = selected_adapter.complete(task=name, system=system, user=attempt_user, schema=schema, attempt=attempt)
                 if reply.status != "ok" or not isinstance(reply.data, dict): raise ModelError("invalid model response", True)
+                structure_error = None
                 if candidate_ids is not None:
                     structure_error = _review_batch_structure_error(reply.data, candidate_ids)
-                    if structure_error:
-                        # 无效回复仍有实际调用成本，但绝不作为 model_reply 缓存或放行。
-                        # 必须把原文带进异常：重试提示里的 previous_output_tail 取自 exc.raw，
-                        # 不带就等于让模型盲改，只会把同类错误再犯一遍（实测重试到 attempt 2 仍失败）。
-                        broken = reply.raw_text or json.dumps(reply.data, ensure_ascii=False)
-                        self.storage.event(task_id, node, "model_reply_invalid", {"task": name, "attempt": attempt, "request_hash": request_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "error": structure_error, "raw_output": broken[:6000]})
-                        raise ModelError(f"invalid review structure: {structure_error}", True, raw=broken)
+                elif name == "rewrite":
+                    structure_error = _rewrite_structure_error(reply.data)
+                if structure_error:
+                    # 无效回复不缓存；原文供下一次结构重试使用。
+                    broken = reply.raw_text or json.dumps(reply.data, ensure_ascii=False)
+                    self.storage.event(task_id, node, "model_reply_invalid", {"task": name, "attempt": attempt, "request_hash": request_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "error": structure_error, "raw_output": broken[:6000]})
+                    raise ModelError(f"invalid {name} structure: {structure_error}", True, raw=broken)
                 self.storage.event(task_id, node, "model_reply", {"task": name, "attempt": attempt, "request_hash": request_hash, "prompt_hash": prompt_hash, "usage": reply.usage, "latency_ms": reply.latency_ms, "data": reply.data})
                 self.storage.event(task_id, node, "node_completed", {"task": name, "attempt": attempt, "request_hash": request_hash, "duration_ms": int((time.monotonic() - started) * 1000), "model_latency_ms": reply.latency_ms, "cached": False})
                 return reply.data
@@ -3197,10 +3284,14 @@ class Pipeline:
                     self.storage.event(task_id, "R01", "review_single_failed", {"candidate_id": cid, "error": str(retry_exc)[:200]})
                     continue
             merged["reviews"].extend(_normalize_reviews(one, [cid]))
-            # thesis_consistency 是任务级结论（两份主旨契约的关系），逐条请求会各自重算；
-            # 旧实现整段丢掉它，只能退回词法兜底。这里保留首次出现的判定。
-            if "thesis_consistency" not in merged and isinstance(one.get("thesis_consistency"), dict):
-                merged["thesis_consistency"] = one["thesis_consistency"]
+            # 逐条请求会独立给出任务级判断，全部留存，不能让首条掩盖后续异议。
+            conclusion = one.get("thesis_consistency")
+            if isinstance(conclusion, dict):
+                merged.setdefault("thesis_consistency_per_candidate", []).append(
+                    {"candidate_id": cid, "conclusion": conclusion}
+                )
+                # 保留旧字段供已有消费者读取；裁决历史使用完整列表。
+                merged.setdefault("thesis_consistency", conclusion)
             if one.get("rubric_version") and "rubric_version" not in merged:
                 merged["rubric_version"] = one["rubric_version"]
         merged["degraded_to_per_candidate"] = True
@@ -3946,8 +4037,9 @@ class Pipeline:
         try:
             user = self._review_input(video, state, [candidate], [checks] if checks else [])
             user["_previous_output_error"] = "；".join(str(e) for e in errors)[:800]
-            user["_instruction"] = ("上一次回复结构不合格（见 _previous_output_error）。每个候选都必须给全 "
-                                    "gates（G1/G2/G3）与 quality（Q1/Q2/Q3，各含 score 与 reason），不得省略。")
+            user["_instruction"] = ("上一次回复校验失败（见 _previous_output_error）。补齐 gates 和 quality；"
+                                    "G3 对照摘录必须逐字来自其引用的原始证据，触发片段来自完整标题。"
+                                    "证据不足就标待核，不得编造原文。")
             raw = self._call(task_id, "R01", "review", user, "ReviewResultBatch", self.review_adapter, rules=state.get("rules"))
         except ModelError as exc:
             if not exc.retryable:
@@ -3989,15 +4081,20 @@ class Pipeline:
                 review["gates"] = {}
             programmatic_g1_flags = mechanical.get("programmatic_g1_flags", [])
             if any(x.get("code") == "G1_SOURCE_ATTRIBUTION_MISSING" for x in programmatic_g1_flags):
-                review["gates"]["G1"] = {"status": "revise", "reason": "可识别信源缺少明确转述关系", "evidence_ids": [], "rule_ids": []}
+                previous_g1 = review["gates"].get("G1") or {}
+                if previous_g1.get("status") not in {"reject", "needs_review"}:
+                    review["gates"]["G1"] = {**previous_g1, "status": "revise", "reason": "可识别信源缺少明确转述关系"}
             # 限定必答项的覆盖校验：机械层登记的每条 requirement 都必须有评审判定。
             # 漏答作为 validation_error 进已有重问通道（单条重问，带错误说明），
             # 重问后仍缺 → unclear 语义，_decide_candidate 会给 needs_review。
             limit_gaps = _limit_check_coverage_errors(review, mechanical)
             validation_errors = validate_review(review, evidence_ids=evidence_ids, rule_ids=rule_ids, issue_codes=set(rubric().get("issue_codes", [])), policy_rule_ids=policy_rule_ids) + limit_gaps
-            if validation_errors and task_id and not review.get("_candidate_retried"):
-                # 整批回复合法、只有这一条漏字段时，单独重问这一条，别把整批降级成待核。
-                retried = self._retry_single_review(task_id, video, state, candidate, checks_by_id.get(cid), validation_errors)
+            comparison_errors = _fresh_g3_comparison_errors(review, candidate, video.evidence) if task_id else []
+            policy = state.get("business_policy", {"status": "missing"})
+            explicit_policy_reject = _explicit_policy_rejection(review, policy)
+            if (validation_errors or comparison_errors) and task_id and not review.get("_candidate_retried") and not explicit_policy_reject:
+                # 对照错误也只重问当前候选，不把来源不明当作标题的机械缺陷。
+                retried = self._retry_single_review(task_id, video, state, candidate, checks_by_id.get(cid), validation_errors + comparison_errors)
                 if retried is not None:
                     retried["_candidate_retried"] = True
                     review = retried
@@ -4009,8 +4106,12 @@ class Pipeline:
                     if not isinstance(review.get("gates"), dict):
                         review["gates"] = {}
                     if any(x.get("code") == "G1_SOURCE_ATTRIBUTION_MISSING" for x in programmatic_g1_flags):
-                        review["gates"]["G1"] = {"status": "revise", "reason": "可识别信源缺少明确转述关系", "evidence_ids": [], "rule_ids": []}
+                        previous_g1 = review["gates"].get("G1") or {}
+                        if previous_g1.get("status") not in {"reject", "needs_review"}:
+                            review["gates"]["G1"] = {**previous_g1, "status": "revise", "reason": "可识别信源缺少明确转述关系"}
                     validation_errors = validate_review(review, evidence_ids=evidence_ids, rule_ids=rule_ids, issue_codes=set(rubric().get("issue_codes", [])), policy_rule_ids=policy_rule_ids) + _limit_check_coverage_errors(review, mechanical)
+                    comparison_errors = _fresh_g3_comparison_errors(review, candidate, video.evidence)
+                    explicit_policy_reject = _explicit_policy_rejection(review, policy)
             if any(x.get("code") == "G4_CHECK_MISSING" for x in mechanical.get("errors", [])):
                 validation_errors.append("programmatic G4 check missing")
             for mechanical_error in mechanical.get("errors", []):
@@ -4080,8 +4181,18 @@ class Pipeline:
                     issue = {"issue_id": f"{cid}-{code}", "primary_dimension": "G3", "issue_code": code, "severity": "high", "repairable": True, "problem_span": candidate.get("headline", ""), "evidence_ids": g3_gate.get("evidence_ids", []) or [], "rule_ids": g3_gate.get("rule_ids", []) or [], "reason": str(g3_gate.get("reason") or fallback_reason), "action": action, "rollback_to": rollback}
                     if not any(i.get("issue_code") == code for i in review.get("issues", []) if isinstance(i, dict)):
                         review.setdefault("issues", []).append(issue)
-            decision = _decide_candidate(review, mechanical, schema_errors=validation_errors, business_policy=state.get("business_policy", {"status": "missing"}))
-            if candidate.get("signal_review_reasons") and decision["status"] == "ready_for_human_review":
+            decision = _decide_candidate(review, mechanical, schema_errors=validation_errors, business_policy=policy)
+            if explicit_policy_reject:
+                decision.update(status="reject", reason="EXPLICIT_BUSINESS_POLICY_REJECTION", repairable=False)
+            elif comparison_errors and decision["status"] != "reject":
+                decision.update(status="needs_review", reason="G3_COMPARISON_UNVERIFIED", repairable=False)
+                decision["gates"]["G3"] = {**(decision["gates"].get("G3") or {}), "status": "needs_review", "reason": "对照或摘录来源未能核实"}
+            review["comparison_errors"] = comparison_errors
+            # 信号限定词表只作观测，不再一票否决自动交付：
+            # 「如果/不能/没有」这类口语假设词出现在 ASR 里不等于标题必须复现；
+            # 本批实测 6 条人工判可用被此路径误拦。RELATIVE_TIME_UNVERIFIED 仍保留拦截。
+            signal_blocks = [x for x in (candidate.get("signal_review_reasons") or []) if x.get("code") != "QUALIFIER_RETENTION_UNVERIFIED"]
+            if signal_blocks and decision["status"] == "ready_for_human_review":
                 decision.update(status="needs_review", reason="SIGNAL_SEMANTICS_UNVERIFIED", repairable=False)
                 decision["signal_review_reasons"] = candidate["signal_review_reasons"]
             review["signal_review_reasons"] = candidate.get("signal_review_reasons", [])
@@ -4616,6 +4727,18 @@ class Pipeline:
                 "rewrite_guidance": parent_review.get("rewrite_guidance", {}),
                 "rewrite_mode": rewrite_mode, "allow_highlight_change": rewrite_mode == "看点",
             })
+            # 重写携带同任务历史失败标题及理由，防止换皮重复（BV1Bgxw6eEMn 12条全拒教训）
+            failed_history = []
+            for prev in state.get("reviews", []):
+                prev_cid = str(prev.get("candidate_id") or "")
+                if prev_cid and prev_cid != source["candidate_id"]:
+                    prev_issues = [i.get("issue_code") for i in (prev.get("issues") or []) if isinstance(i, dict)]
+                    if prev_issues:
+                        prev_cand = next((c for c in (known_candidates or []) if c.get("candidate_id") == prev_cid), None)
+                        if prev_cand:
+                            failed_history.append({"title": prev_cand.get("rendered_title") or prev_cand.get("headline"), "issues": prev_issues})
+            if failed_history:
+                user["failed_sibling_titles"] = failed_history[:5]
             attack_hits = find_personal_attacks(str(source.get("rendered_title") or source.get("headline") or ""))
             if attack_hits:
                 user["forbidden_terms"] = {"rule_id": "P9", "terms": attack_hits, "instruction": attack_rewrite_hint(attack_hits)}
@@ -4645,6 +4768,15 @@ class Pipeline:
                 "full_payload_chars": full_payload_chars,
                 "compress_payload_chars": len(json.dumps(user, ensure_ascii=False)),
             })
+        # 仅显式定向重写可携带已校验的人评；放在压缩载荷重建之后，避免被丢弃。
+        human_feedback = state.get("targeted_rewrite_feedback")
+        if source and isinstance(human_feedback, dict):
+            title = str(source.get("rendered_title") or source.get("headline") or "")
+            if (human_feedback.get("task_id") != task_id
+                    or human_feedback.get("candidate_id") != source.get("candidate_id")
+                    or human_feedback.get("title_hash") != hashlib.sha256(title.encode("utf-8")).hexdigest()):
+                raise ValueError("人工反馈与重写父候选身份不一致")
+            user["human_rewrite_feedback"] = human_feedback
         memory_calls = int(state.get("memory_calls", 0))
         if rewrite_mode != "压缩" and memory_calls < self.config.memory_call_limit:
             memory_query = parent_review.get("memory_query") or {}
@@ -4785,11 +4917,19 @@ class Pipeline:
                 self.storage.event(task_id, "R00", "thesis_review_failed", {"error": str(exc)})
         checks = [{"candidate_id": c["candidate_id"], **c["mechanical_checks"], "programmatic_g1_flags": c["programmatic_g1_flags"]} for c in candidates]
         review_raw = self._review_with_fallback(task_id, video, state, candidates, checks)
-        declared = _normalize_thesis_consistency(review_raw)
-        if declared:
-            declared["round"] = rewrite_round
-            state.setdefault("thesis_consistency_history", []).append(declared)
-            state["thesis_consistency"] = declared
+        per_candidate = review_raw.get("thesis_consistency_per_candidate")
+        if isinstance(per_candidate, list):
+            declarations = [(item.get("candidate_id"), _normalize_thesis_consistency(item.get("conclusion")))
+                            for item in per_candidate if isinstance(item, dict)]
+        else:
+            declarations = [(None, _normalize_thesis_consistency(review_raw))]
+        for candidate_id, declared in declarations:
+            if declared:
+                declared["round"] = rewrite_round
+                if candidate_id is not None:
+                    declared["candidate_id"] = candidate_id
+                state.setdefault("thesis_consistency_history", []).append(declared)
+                state["thesis_consistency"] = declared
         state["prompt_hashes"]["review"] = self._last_prompt_hash(task_id, "R01", "review")
         reviews = _normalize_reviews(review_raw, [c["candidate_id"] for c in candidates])
         reviews, decisions = self._validate_and_decide_reviews(video, state, candidates, reviews, checks, task_id)
@@ -4817,25 +4957,28 @@ class Pipeline:
         return {"candidates": candidates, "reviews": reviews, "decisions": decisions, "route": route}
 
     def _handoff(self, task_id: str, state: dict[str, Any], route: dict[str, Any]) -> str:
-        # 兜底：任何路径都不能让候选从人工视野里消失。
-        # 各分支（THESIS_CONTRACT_INVALID / SUBROUTE_ESCALATION / HIGHLIGHT_RESELECTION_LIMIT
-        # / REWRITE_BUDGET_EXHAUSTED）各自现拼 route，很容易忘了带候选清单——一旦漏掉，
-        # 人工连「要看哪条」都不知道。这里统一检查：清单为空但状态里已有未被业务拒绝的候选，
-        # 就整组转为「待人工核实」（交给人工，但不自动放行）。
+        # 待核和待重写候选即使与可推荐候选并存，也应进入人工视野；
+        # 只补充待核清单，不改变推荐、交付或风险拒绝的判定。
         surface = (set(route.get("eligible_candidate_ids") or [])
                    | set(route.get("pending_review_candidate_ids") or [])
                    | set(route.get("candidate_ids") or []))
+        statuses = {"needs_review", "rewrite"}
         if not surface:
-            # rewrite 也要捞：它表示「系统认为值得改、但重写预算已经用尽」。
-            # 走到 _handoff 时流程已终结，这些候选就是终态产物——不交出去，人工看到的
-            # 就只有空清单（BV1qBxE6JESv 九条全 rewrite、BV1uWnZ6vEvj 三条全 rewrite 都栽在这）。
-            # rejected 仍然排除：那是系统明确判定不可用的。
-            kept = [str(d.get("candidate_id")) for d in (state.get("candidate_decisions") or [])
-                    if d.get("candidate_id")
-                    and d.get("status") in {"ready_for_human_review", "needs_review", "rewrite"}]
-            if kept:
-                route = {**route, "pending_review_candidate_ids": kept}
-                state["route"] = route
+            # 原有空清单兜底：分支遗漏候选时，已通过的候选也只作为待核交出。
+            statuses.add("ready_for_human_review")
+        pending = list(route.get("pending_review_candidate_ids") or [])
+        added = False
+        for decision in state.get("candidate_decisions") or []:
+            candidate_id = decision.get("candidate_id")
+            if candidate_id and decision.get("status") in statuses:
+                candidate_id = str(candidate_id)
+                if candidate_id not in surface:
+                    pending.append(candidate_id)
+                    surface.add(candidate_id)
+                    added = True
+        if added:
+            route = {**route, "pending_review_candidate_ids": pending}
+            state["route"] = route
         status = "pending_human" if route["action"] in {"handoff", "needs_review"} else "stopped"
         state["uncalibrated"] = True
         self.storage.checkpoint(task_id, status, state, "N12", "human_handoff", {"status": status, "route": route})

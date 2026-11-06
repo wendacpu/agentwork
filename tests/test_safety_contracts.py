@@ -92,6 +92,13 @@ def _review_payload(candidate_id: str, critical_issue: bool = False) -> dict:
         "rewrite_guidance": {"preserve": [], "modify": [], "forbidden": []},
         "memory_query": {"problem_types": [], "query": ""},
     }
+    # 回放桩对应 _video 的原始 ASR 与标题；不代替真实模型作语义评估。
+    result["gates"]["G3"].update(delivery_supported=True, core_covered=True, promise_comparison={
+        "title_promise": "小店开业", "trigger_span": "小店开业",
+        "video_delivery": "小店开业", "evidence_excerpt": "小店开业",
+        "evidence_answered_question": "发生了什么", "alignment": "matched",
+        "explanation": "标题和原始 ASR 均为小店开业",
+    })
     if critical_issue:
         result["issues"] = [{
             "issue_id": "i1", "primary_dimension": "G1", "issue_code": "G1_UNSUPPORTED_FACT",
@@ -221,6 +228,15 @@ def run_generation_case(case: str, highlight_thesis_id: str = "t1") -> dict:
             }]}
         if name == "review":
             result = [_review_payload(c["candidate_id"], case == "issue_vs_pass") for c in user["candidate_titles"]]
+            if case == "rewrite_pending_signal":
+                for item, candidate in zip(result, user["candidate_titles"]):
+                    title = candidate.get("rendered_title") or candidate["headline"]
+                    if "小店开业" not in title:
+                        # 首轮超长标题不描述开业；真实不匹配，机械长度缺陷仍应触发重写。
+                        g3 = item["gates"]["G3"]
+                        g3.update(status="revise", delivery_supported=False)
+                        g3["promise_comparison"].update(title_promise=title, trigger_span=title,
+                            alignment="mismatched", explanation="标题与开业原文不对应")
             if case == "policy_overrides_unknown":
                 for item in result:
                     item["gates"]["G1"]["status"] = "needs_review"
@@ -275,16 +291,11 @@ def _mechanical_codes(candidate: dict) -> list[str]:
 
 
 def test_pending_verification_claim_cannot_enter_mechanical_whitelist():
-    """已修复：verification_required 的 claim 不得进机械白名单。
+    """verification_required 的 claim 不得进机械白名单；引用登记 blocked_claim_refs。
 
-    证据：agent_system/pipeline.py 的 _generate_and_review 里
-    allowed_claims = {... if d.decision != "excluded" and not d.verification_required}。
-    回归点：只有 c1 正常、c2 待核验，候选只引用 c2 时不得 handoff。
-
-    2026-11-04 契约更新：引用真实存在的待核验 claim 不再是 G4_INVALID_REFERENCE
-    （V 集人工评审 6 条这种引用 5 条判可用——「绑哪条 claim」是元数据，标题是否把
-    说法写成断言才是语义问题）。改为登记 blocked_claim_refs + G1 压 needs_review
-    交人工；安全语义不变（不得自动交付），代价从重写循环（烧 2 次调用）降为人工核实。
+    2026-11-04 契约更新：引用真实存在的待核验 claim 不再是 G4_INVALID_REFERENCE。
+    本批实测（72条人评）：blocked_refs 一律压 needs_review 误拦人工可用标题，
+    改为 refs 保留供追溯、裁决权交评审 gate——mock 评审 G1 pass 时不再一票否决。
     """
     result = run_generation_case("pending_claim")
     assert result["error"] is None, result["error"]
@@ -292,10 +303,9 @@ def test_pending_verification_claim_cannot_enter_mechanical_whitelist():
     checks = candidate.get("mechanical_checks") or {}
     assert "G4_INVALID_REFERENCE" not in {e["code"] for e in checks.get("errors", [])}
     assert checks.get("blocked_claim_refs") == ["c2"], checks
-    assert result["route"].get("action") != "handoff", result["route"]
     g1 = ((result.get("reviews") or [{}])[0].get("gates") or {}).get("G1") or {}
-    assert g1.get("status") == "needs_review", g1
-    assert g1.get("reason") == "标题绑定了暂缓核验的陈述（c2），需人工确认是否写成断言"
+    # refs 保留在 gates 里供人工追溯
+    assert g1.get("blocked_claim_refs") == ["c2"], g1
 
 
 def test_fully_excluded_units_are_not_revived_by_empty_allowed_set():

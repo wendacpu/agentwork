@@ -15,6 +15,7 @@ from agent_system.labels import body_budget, extract_inline_prefixes, normalize_
 from agent_system.model import MockAdapter
 from agent_system.pipeline import Pipeline, _decide_candidate, _mechanical_check, _policy_action
 from agent_system.storage import Storage
+from g3_test_helpers import EvidenceReviewAdapter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,13 +99,10 @@ class PrefixTests(unittest.TestCase):
         self.assertEqual(body_budget(20, ["剧情演绎"]), 14)
         self.assertEqual(body_budget(20, ["剧情演绎", "AI生成"]), 8)
 
-    def test_missing_required_prefix_is_a_warning_not_a_block(self):
-        # 前缀在生成侧由 normalize_prefix_labels 无条件并进候选、渲染时由 render_labels 写进标题，
-        # 所以「缺前缀」在机械校验这层不可达：全库 23 个必填前缀任务 / 91 条候选 / 0 次命中。
-        # 只有绕过归一化手搓状态才会缺，此时留观测即可，不该阻断交付。
+    def test_missing_required_prefix_blocks_delivery(self):
+        # 快照被改动或重评路径异常时也不能交付缺少必填标记的标题。
         result = _checks(_candidate(prefix_labels=[]), required=["剧情演绎"])
-        self.assertNotIn("G4_PREFIX_MISSING", {e["code"] for e in result["errors"]})
-        self.assertIn("G4_PREFIX_MISSING", {w["code"] for w in result["warnings"]})
+        self.assertIn("G4_PREFIX_MISSING", {e["code"] for e in result["errors"]})
 
     def test_prefix_budget_exhausted_is_a_business_decision(self):
         result = _checks(_candidate(headline="短标题"), max_chars=16, required=["剧情演绎", "AI生成"])
@@ -229,8 +227,9 @@ class EndToEndBasicsTests(unittest.TestCase):
         weak = self.dataset.get("BV1Ltsf6xEpV")
         weak.asr_segments = []
         weak.ocr_segments = []
+        pipeline = Pipeline(self.dataset, self.storage, EvidenceReviewAdapter(), self.config)
         with mock.patch.object(self.dataset, "get", return_value=weak):
-            task_id = self.pipeline.run("BV1Ltsf6xEpV")
+            task_id = pipeline.run("BV1Ltsf6xEpV")
         state = json.loads(self.storage.get_task(task_id)["state_json"])
         self.assertEqual(state["input_quality"]["level"], "low")
         self.assertEqual(state["route"]["action"], "needs_review")
