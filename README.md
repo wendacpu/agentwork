@@ -7,7 +7,7 @@
 - 生成、独立评审、程序裁决、人工三档判定（可用 / 勉强通过 / 不可用）已闭环，判定写入 `templates/gold.csv`。
 - 标题前缀标注位（`agent_system/labels.py`）：剧情演绎 / AI生成由程序按形态与属性判定，前缀与正文合计 ≤ `max_chars`，前缀不豁免。
 - 外部搜索核查（`agent_system/verification/`，节点 N03V）：已接线但**默认关闭**，需 `.env` 里显式开启；当前只覆盖「资讯」域。选择方式分 `off` / `static` / `dynamic` 三档（默认 `static`，即按品类路由），见 `docs/verification-dynamic-routing.md`。
-- 测试命令：`python3 -m pytest -q`。信号守卫、反馈修复闭环、身份与评测口径回归当前实测 **1076 passed, 0 xfailed**；历史运行与数据快照见 `runtime/`（不入库），不能替代后续重测。
+- 测试命令：`python3 -m pytest -q`。信号守卫、反馈修复闭环、身份与评测口径回归当前实测 **1093 passed, 0 xfailed**；历史运行与数据快照见 `runtime/`（不入库），不能替代后续重测。
 
 ## 快速开始
 
@@ -16,7 +16,7 @@
 scripts/run.sh audit
 scripts/run.sh --config config.deepseek.json batch BV1Ltsf6xEpV
 
-python3 -m pytest -q                                  # 当前实测：480 passed, 0 xfailed
+python3 -m pytest -q                                  # 当前实测：1093 passed, 0 xfailed
 python -m agent_system.cli audit
 python -m agent_system.cli run BV1Ltsf6xEpV
 python -m agent_system.cli batch --limit 10
@@ -231,6 +231,8 @@ python3 -m agent_system.repairs group
 
 **来源标题孤证按候选逐条降级，不连坐**：只引用 `quality=source` 原题/原始标题、且没有 `raw_asr` / `raw_ocr` / `raw_frame` 至少 6 个连续规范化字符重合的候选，进入 `pending_review_candidate_ids`；同批有其它合格候选时保留 `handoff` 与原顺序，只有全批都是孤证时才整批 `SOURCE_TITLE_ONLY_UNVERIFIED`。`model_derived_uncalibrated` 不能作为升级依据。回归见 `tests/test_source_only_partial.py`。
 
+**R01 评审模型筛选先隔离再比较**：`scripts/review_screening.py` 只接受 `runtime/review_selection_development_v2/blind_inputs.jsonl` 的白名单字段，递归拒绝人工标签键；固定读取 `review_model`，直评三档「可用 / 勉强通过 / 不可用」，显式关闭 schema 强约束，并为每次调用保留原始响应、用量、耗时与错误。非 mock 运行必须明确 `--config --max-items --out`，已有结果或未完成 partial 均拒绝覆盖；`scripts/review_screening_score.py` 才读取隔离的标签来源，并把缺记录、失败和待核留在分母中单列。Mock 冒烟只证明机制，不证明模型质量；付费候选名单、版本、价格、请求/重试/超时上限仍须事前批准。回归见 `tests/test_review_screening.py`。
+
 **零产出闸门按「能救就救」处理**，不再让一处结构瑕疵换掉整条视频：
 
 - 边界节点若按 `usable_claims`/`limited_claims`/`excluded_claims` 分组给 ID（而不是逐条决策对象），归一化会还原成逐条决策；同一陈述出现在多个分组时取最严。曾经这种情况被读成 0 条决策，整任务判 `NO_USABLE_CLAIM`。
@@ -299,6 +301,7 @@ python3 -m agent_system.service --config config.mock-smoke.json --db runtime/ser
 
 - `POST /tasks {video_id, source?, idempotency_key?}`：prepare 建任务并入队返回 202；幂等键重复返回原任务不新建；熔断或超日预算 429 拒收（不囤积）。
 - `GET /tasks/<id>` 任务终态 + 候选 + 队列状态；`GET /queue` backlog、熔断、预算、时延 p50/p95；`GET /materials?video_id=[&all=1]` 物料最新/全版本。
+- `GET /consume?video_id=` 只返回当前可交付的系统推荐物料；`POST /signals {material_id,event,ts,idempotency_key?,payload?}` 写入**模拟**行为信号，并经既有 `repair_outbox` 形成可审查修复假设。信号明确带 `simulated=true`，不写人工判定/金标，不代表真实曝光、CTR 或线上效果；详情见 `docs/recommendation-integration.md`。
 - **`material_store` 是对外物料契约**（不是 agent.db 内部表的裸暴露）：每候选一行，三槽实名 `source_rewrite / core_summary / core_hook`，含渲染完整标题、交付态（recommended / not_recommended / needs_review / rejected / failed）、风险标（policy_hits、limit_pending、verification_risk、机检错误码）、评审摘要、版本指纹（规则/模型/Prompt 哈希）；同视频新任务写入时旧行自动 `superseded_by` 指向新任务，版本链只追加不覆盖。
 - 护栏：401/402/403/missing key 触发熔断（与 `scripts/run_acceptance.py` 同口径，不另造）；worker 停止领新任务但 backlog 保留，恢复用 `POST /admin/circuit {"reset":true}` 或重启；`--max-tasks-per-day`（默认 50）在入队闸门计数。
 - 崩溃恢复：启动时把队列 `running` 复位 `queued`，`Pipeline.execute` 走 checkpoint 续跑并复用已完成模型调用，重领不重复付费；task_queue / material_store / service_state / service_usage 四表与任务库同文件，不侵入 `storage.py`。

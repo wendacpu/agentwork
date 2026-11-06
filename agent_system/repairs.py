@@ -33,9 +33,12 @@ class RepairStore:
 
     def enqueue(self, task_id: str, state: dict, decision: dict, candidate: dict, *, withdrawn=False, source='live') -> str:
         key = f"{task_id}:{candidate.get('candidate_id', decision.get('candidate_id', ''))}"
+        # 模拟信号必须显式隔离反馈键，不能覆盖或伪装成同候选的人工三档判定。
+        if source == 'simulated_signal':
+            key = f"{key}:simulated_signal"
         snapshot = {k: state.get(k) for k in ('video', 'understanding', 'boundary', 'rules', 'prompt_hashes', 'risk_signals')}
         snapshot['reviews'] = [r for r in state.get('reviews', []) if r.get('candidate_id') == candidate.get('candidate_id')]
-        payload = {'task_id': task_id, 'candidate': candidate, 'decision': decision, 'snapshot': snapshot, 'withdrawn': withdrawn}
+        payload = {'task_id': task_id, 'candidate': candidate, 'decision': decision, 'snapshot': snapshot, 'withdrawn': withdrawn, 'source': source}
         revision = hashlib.sha256(_json(payload).encode()).hexdigest()
         previous = self.conn.execute('SELECT event_id,payload FROM repair_outbox WHERE feedback_key=? ORDER BY rowid DESC LIMIT 1', (key,)).fetchone()
         if previous and previous[1] == _json(payload):
@@ -65,7 +68,12 @@ class RepairStore:
                 original = candidate.get('rendered_title') or candidate.get('headline') or ''
                 final = decision.get('final_headline') or ''
                 changed = bool(final and final not in {original, candidate.get('headline', '')})
-                negative = decision.get('decision') in {'rejected', 'marginal'} or (decision.get('decision') == 'approved' and changed)
+                simulated_negative = (payload.get('source') == 'simulated_signal'
+                                      and (decision.get('signal') or {}).get('event') == 'negative_feedback')
+                negative = (decision.get('decision') in {'rejected', 'marginal'}
+                            or (decision.get('decision') == 'approved' and changed)
+                            or simulated_negative)
+                # 模拟负反馈只创建待核查的修复假设，绝不写入人工判定/金标。
                 status = 'withdrawn' if payload['withdrawn'] else 'triage' if negative else 'no_defect'
                 diagnosis, proposal = diagnose(payload) if status == 'triage' else ({}, {})
                 prior = self.conn.execute('SELECT revision FROM repair_defects WHERE feedback_key=?', (key,)).fetchone()

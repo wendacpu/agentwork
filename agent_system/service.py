@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sqlite3
@@ -131,6 +132,12 @@ class ServiceStore:
         CREATE INDEX IF NOT EXISTS idx_material_task ON material_store(task_id);
         CREATE TABLE IF NOT EXISTS service_state(key TEXT PRIMARY KEY, value_json TEXT);
         CREATE TABLE IF NOT EXISTS service_usage(date TEXT PRIMARY KEY, tasks INTEGER, prompt_tokens INTEGER, completion_tokens INTEGER);
+        CREATE TABLE IF NOT EXISTS service_signals(
+          signal_id TEXT PRIMARY KEY, idempotency_key TEXT UNIQUE,
+          material_id TEXT NOT NULL, task_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
+          event TEXT NOT NULL, occurred_at TEXT NOT NULL, payload_json TEXT NOT NULL,
+          repair_event_id TEXT, created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_signal_material ON service_signals(material_id);
         """)
         self.conn.commit()
         self.lock = threading.Lock()
@@ -285,6 +292,53 @@ class ServiceStore:
         sql += " ORDER BY created_at, candidate_id"
         with self.lock:
             return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+
+    # ---- 模拟消费信号 ----
+
+    def select_material(self, video_id: str) -> dict[str, Any] | None:
+        """当前消费者策略：只展示最新版的系统推荐物料，绝不绕过人工/路由护栏。"""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM material_store WHERE video_id=? AND superseded_by IS NULL "
+                "AND is_recommended=1 AND delivery_state='recommended' "
+                "ORDER BY created_at DESC LIMIT 1", (video_id,)).fetchone()
+        return dict(row) if row else None
+
+    def material_by_id(self, material_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM material_store WHERE material_id=?", (material_id,)).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def signal_key(material_id: str, event: str, occurred_at: str, payload: dict[str, Any],
+                   idempotency_key: str | None) -> str:
+        if idempotency_key:
+            return idempotency_key
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(f"{material_id}|{event}|{occurred_at}|{canonical}".encode("utf-8")).hexdigest()
+
+    def signal_by_idempotency(self, key: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM service_signals WHERE idempotency_key=?", (key,)).fetchone()
+        return dict(row) if row else None
+
+    def record_signal(self, row: dict[str, Any], event: str, occurred_at: str, payload: dict[str, Any],
+                      idempotency_key: str | None, repair_event_id: str) -> tuple[dict[str, Any], bool]:
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        key = self.signal_key(row["material_id"], event, occurred_at, payload, idempotency_key)
+        with self.lock:
+            existing = self.conn.execute("SELECT * FROM service_signals WHERE idempotency_key=?", (key,)).fetchone()
+            if existing:
+                return dict(existing), True
+            signal_id = f"sig-{uuid.uuid4().hex[:12]}"
+            self.conn.execute(
+                "INSERT INTO service_signals(signal_id,idempotency_key,material_id,task_id,candidate_id,event,occurred_at,payload_json,repair_event_id,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (signal_id, key, row["material_id"], row["task_id"], row["candidate_id"], event,
+                 occurred_at, canonical, repair_event_id, now_iso()))
+            self.conn.commit()
+            created = self.conn.execute("SELECT * FROM service_signals WHERE signal_id=?", (signal_id,)).fetchone()
+        return dict(created), False
 
     def close(self) -> None:
         try:
@@ -545,6 +599,74 @@ class ServiceApp:
         rows = self.store.materials(video_id=video_id, include_superseded=include_superseded)
         return 200, {"materials": rows, "count": len(rows)}
 
+    def handle_get_consume(self, video_id: str) -> tuple[int, dict[str, Any]]:
+        if not video_id:
+            return 400, {"error": "video_id is required"}
+        material = self.store.select_material(video_id)
+        if material is None:
+            return 404, {"error": "no_current_recommended_material", "video_id": video_id}
+        # 明示演示性质：调用方得到的是选择结果，不把展示记录成真实线上曝光。
+        return 200, {"selection": {"material_id": material["material_id"], "video_id": material["video_id"],
+                                   "full_title": material["full_title"], "slot": material["slot"],
+                                   "version_fingerprint": json.loads(material["version_fingerprint"] or "{}")},
+                     "simulated": True,
+                     "note": "模拟消费选择；未记录真实曝光，不能用于 CTR 或线上效果结论。"}
+
+    def handle_post_signal(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        material_id = str(payload.get("material_id") or "")
+        event = str(payload.get("event") or "").strip()
+        occurred_at = str(payload.get("ts") or "").strip()
+        idempotency_key = str(payload.get("idempotency_key") or "").strip() or None
+        if not material_id or not event or not occurred_at:
+            return 400, {"error": "material_id, event and ts are required"}
+        if event not in {"impression", "click", "dismiss", "negative_feedback"}:
+            return 400, {"error": "event must be impression, click, dismiss or negative_feedback"}
+        try:
+            datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        except ValueError:
+            return 400, {"error": "ts must be ISO-8601"}
+        material = self.store.material_by_id(material_id)
+        if material is None:
+            return 404, {"error": f"material not found: {material_id}"}
+        if material.get("superseded_by") is not None:
+            return 409, {"error": "material_superseded", "superseded_by": material["superseded_by"]}
+        if not material.get("is_recommended") or material.get("delivery_state") != "recommended":
+            return 409, {"error": "material_not_consumable", "delivery_state": material.get("delivery_state")}
+        extra = payload.get("payload") or {}
+        if not isinstance(extra, dict):
+            return 400, {"error": "payload must be an object"}
+        signal_payload = {"simulated": True, "event": event, "occurred_at": occurred_at, "metadata": extra}
+        key = self.store.signal_key(material_id, event, occurred_at, signal_payload, idempotency_key)
+        existing = self.store.signal_by_idempotency(key)
+        if existing is not None:
+            return 200, {"signal_id": existing["signal_id"], "deduplicated": True, "simulated": True,
+                         "repair_event_id": existing["repair_event_id"]}
+
+        storage = self._open_storage()
+        try:
+            task = storage.get_task(material["task_id"])
+            state = json.loads(task["state_json"] or "{}")
+            candidate = next((c for c in state.get("candidates") or []
+                              if str(c.get("candidate_id")) == str(material["candidate_id"])), None)
+            if candidate is None:
+                return 409, {"error": "candidate_not_available_for_signal"}
+            from .repairs import RepairStore
+            decision = {"candidate_id": material["candidate_id"], "decision": "signal_observation",
+                        "reason": f"simulated {event} signal; not a human verdict or CTR", "signal": signal_payload}
+            repair_event_id = RepairStore(storage.conn).enqueue(
+                material["task_id"], state, decision, candidate, source="simulated_signal")
+            storage.event(material["task_id"], "SVC", "simulated_signal_received",
+                          {"material_id": material_id, "event": event, "occurred_at": occurred_at,
+                           "repair_event_id": repair_event_id, "simulated": True})
+            result = storage.process_repairs()
+            stored, duplicate = self.store.record_signal(material, event, occurred_at, signal_payload,
+                                                         idempotency_key, repair_event_id)
+        finally:
+            close_storage(storage)
+        return 202, {"signal_id": stored["signal_id"], "deduplicated": duplicate, "simulated": True,
+                     "repair_event_id": repair_event_id, "repair": result,
+                     "note": "已走模拟信号→repair_outbox；不是人工判定、真实 CTR 或线上效果。"}
+
     def handle_reset_circuit(self) -> tuple[int, dict[str, Any]]:
         self.breaker.reset()
         storage = self._open_storage()
@@ -558,10 +680,14 @@ class ServiceApp:
         parts = [p for p in path.split("/") if p]
         if method == "POST" and parts == ["tasks"]:
             return self.handle_post_task(body)
+        if method == "POST" and parts == ["signals"]:
+            return self.handle_post_signal(body)
         if method == "POST" and parts == ["admin", "circuit"]:
             if body.get("reset"):
                 return self.handle_reset_circuit()
             return 400, {"error": "reset:true required"}
+        if method == "GET" and parts == ["consume"]:
+            return self.handle_get_consume((query.get("video_id") or [""])[0])
         if method == "GET" and parts == ["queue"]:
             return self.handle_get_queue()
         if method == "GET" and parts == ["materials"]:

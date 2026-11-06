@@ -169,6 +169,72 @@ class ServiceAppTests(unittest.TestCase):
                         "复位后必须续跑到终态")
         self.assertEqual(app.store.counts()["running"], 0)
 
+    # ---- P2：模拟消费与信号回流 ----
+
+    def test_consumer_selects_only_current_recommended_material(self):
+        # 不启动 worker：否则测试插入的同视频历史物料会被真实任务异步 supersede。
+        app = self.make_app(workers=0)
+        app.store.conn.execute(
+            "INSERT INTO material_store(material_id,video_id,task_id,candidate_id,full_title,is_recommended,delivery_state,version_fingerprint,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            ("old", VIDEO, "old-task", "old-candidate", "旧标题", 1, "recommended", "{}", "2026-01-01T00:00:00+00:00"))
+        app.store.conn.execute(
+            "INSERT INTO material_store(material_id,video_id,task_id,candidate_id,full_title,is_recommended,delivery_state,version_fingerprint,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            ("current", VIDEO, "current-task", "current-candidate", "现标题", 1, "recommended", "{}", "2026-01-02T00:00:00+00:00"))
+        app.store.conn.execute("UPDATE material_store SET superseded_by='current-task' WHERE material_id='old'")
+        app.store.conn.commit()
+        code, body = app.handle_get_consume(VIDEO)
+        self.assertEqual(code, 200)
+        self.assertTrue(body["simulated"])
+        self.assertEqual(body["selection"]["material_id"], "current")
+        self.assertIn("不能用于 CTR", body["note"])
+
+    def test_simulated_signal_is_idempotent_and_does_not_create_human_verdict(self):
+        app = self.make_app()
+        code, created = app.handle_post_task({"video_id": VIDEO, "source": "test"})
+        self.assertEqual(code, 202)
+        task_id = created["task_id"]
+        self.assertTrue(wait_for(lambda: (app.store.queue_row(task_id) or {}).get("state") == "done"))
+        # mock 链路可正常终态但路由为 needs_review；P2 只消费允许交付的推荐物料，
+        # 因此此处构造一行与任务候选严格对应的对外契约物料。
+        storage = app._open_storage()
+        try:
+            state = json.loads(storage.get_task(task_id)["state_json"] or "{}")
+            candidate = next(c for c in state["candidates"] if c.get("candidate_id"))
+        finally:
+            from agent_system.service import close_storage
+            close_storage(storage)
+        app.store.conn.execute(
+            "INSERT INTO material_store(material_id,video_id,task_id,candidate_id,full_title,is_recommended,delivery_state,version_fingerprint,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            ("signal-material", VIDEO, task_id, candidate["candidate_id"], candidate.get("rendered_title") or candidate["headline"],
+             1, "recommended", "{}", "2026-11-06T00:00:00+00:00"))
+        app.store.conn.commit()
+        material = app.store.material_by_id("signal-material")
+        payload = {"material_id": material["material_id"], "event": "negative_feedback",
+                   "ts": "2026-11-06T12:00:00Z", "idempotency_key": "signal-1",
+                   "payload": {"reason": "simulated_demo"}}
+        first_code, first = app.handle_post_signal(payload)
+        second_code, second = app.handle_post_signal(payload)
+        self.assertEqual(first_code, 202)
+        self.assertEqual(second_code, 200)
+        self.assertTrue(first["simulated"])
+        self.assertTrue(second["deduplicated"])
+        self.assertEqual(first["repair_event_id"], second["repair_event_id"])
+        self.assertEqual(app.store.conn.execute("SELECT count(*) FROM service_signals").fetchone()[0], 1)
+        storage = app._open_storage()
+        try:
+            human_count = storage.conn.execute("SELECT count(*) FROM human_decisions WHERE task_id=?", (task_id,)).fetchone()[0]
+            event = storage.conn.execute("SELECT payload_json FROM events WHERE task_id=? AND event_type='simulated_signal_received'", (task_id,)).fetchone()
+            repair = storage.conn.execute("SELECT payload FROM repair_outbox WHERE event_id=?", (first["repair_event_id"],)).fetchone()
+            self.assertEqual(human_count, 0, "模拟信号绝不能伪装成人工三档判定")
+            self.assertTrue(event)
+            self.assertEqual(json.loads(repair[0])["source"], "simulated_signal")
+        finally:
+            from agent_system.service import close_storage
+            close_storage(storage)
+
     # ---- HTTP 环回：真实 server 一次 ----
 
     def test_http_roundtrip(self):
