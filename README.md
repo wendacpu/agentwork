@@ -7,7 +7,7 @@
 - 生成、独立评审、程序裁决、人工三档判定（可用 / 勉强通过 / 不可用）已闭环，判定写入 `templates/gold.csv`。
 - 标题前缀标注位（`agent_system/labels.py`）：剧情演绎 / AI生成由程序按形态与属性判定，前缀与正文合计 ≤ `max_chars`，前缀不豁免。
 - 外部搜索核查（`agent_system/verification/`，节点 N03V）：已接线但**默认关闭**，需 `.env` 里显式开启；当前只覆盖「资讯」域。选择方式分 `off` / `static` / `dynamic` 三档（默认 `static`，即按品类路由），见 `docs/verification-dynamic-routing.md`。
-- 测试命令：`python3 -m pytest -q`。信号守卫、反馈修复闭环、身份与评测口径回归实测 **480 passed, 0 xfailed**（原 7 条 xfail 缺陷已在本轮修复并转为正常断言，见 `docs/a-stage-verification.md`）；历史运行与数据快照见 `runtime/`（不入库），不能替代后续重测。
+- 测试命令：`python3 -m pytest -q`。信号守卫、反馈修复闭环、身份与评测口径回归当前实测 **1076 passed, 0 xfailed**；历史运行与数据快照见 `runtime/`（不入库），不能替代后续重测。
 
 ## 快速开始
 
@@ -228,6 +228,8 @@ python3 -m agent_system.repairs group
 `rereview` 只重判既有候选，不重新生成标题：它把原任务状态复制进 `runtime/<output_dir>/rereviews/<唯一目录>/agent.db` 再裁决，原库保持只读（CLI 走 `mode=ro`）。隔离库冻结每个候选的 `candidate_id`、正文与完整标题哈希，重评前后各校验一次，任一漂移即失败；同时记录源库路径、视频快照哈希、生成/评审模型与提示词版本。「是否隔离」按目录结构判定（库必须位于 `<output_dir>/rereviews/` 下），不靠「表存在」自证——否则往原库手插一张 `rereview_snapshot` 就能让重评把事件写回原库。重评中途失败会删掉半成品隔离库，不留无主残留。载体（视频/旁白/字幕/画面）不是信源：剧情演绎类视频的叙述属性由【剧情演绎】前缀声明，正文再写「旁白：」按 G4_META_PHRASE 判否；边界不得对纯旁白内容要求 attribution_required，也不得整批置 verification_required（F09 属 U-S08 豁免档）。模型把结构化输出包一层信封（`{"type":"json_object","content":…}` 或 `{"BoundarySet":…}`）时由 `_unwrap_envelope` 拆开，避免理解/边界静默零输出。缺视频快照、缺候选或重写预算已用尽时明确停下，不补造候选、不重新打开重写循环；交付槽位与初次生成共用同一套 `_slot_delivery` / `_apply_slot_delivery`，降级时清空旧的「已交付」清单。
 
 **多段并列视频只能有一个主线，取开头那段**：由几段互不相干的故事/案例拼成的视频，若把「合集」当主旨，`core_unit_ids` 会并列多段，`core_hook` 就会拿尾段最猎奇的那个去生成标题。实测：装死视频（0–23.4 秒）与铁锹绑RPG（无 ASR 证据的尾段）并列成核心，标题变成「铁锹绑RPG弹头破层深爆」。现在 N07 后按 ASR 证据反推各核心单元的时段，`core_unit_ids` 超过一个且起点相差 ≥ 8 秒时只保留开头叙事段，其余降为支撑（记录在 `mainline_demoted_units`）；完全无时间证据的单元不得与有证据的主线并列。同时 `core_hook` 槽必须绑定主看点，换成其它片段记 `G4_HOOK_OFF_MAINLINE`。
+
+**来源标题孤证按候选逐条降级，不连坐**：只引用 `quality=source` 原题/原始标题、且没有 `raw_asr` / `raw_ocr` / `raw_frame` 至少 6 个连续规范化字符重合的候选，进入 `pending_review_candidate_ids`；同批有其它合格候选时保留 `handoff` 与原顺序，只有全批都是孤证时才整批 `SOURCE_TITLE_ONLY_UNVERIFIED`。`model_derived_uncalibrated` 不能作为升级依据。回归见 `tests/test_source_only_partial.py`。
 
 **零产出闸门按「能救就救」处理**，不再让一处结构瑕疵换掉整条视频：
 

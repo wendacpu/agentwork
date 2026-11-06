@@ -2699,6 +2699,63 @@ def _mechanical_check(candidate: dict[str, Any], *, allowed_claims: set[str], al
     return {"status": "fail" if errors else "pass", "errors": errors, "warnings": warnings, "policy_hits": policy_hits, "limit_pending": limit_pending, "limit_requirements": limit_requirements, "blocked_claim_refs": blocked_refs, "attribution_check": attribution_check, "title_length": len(rendered), "body_length": len(head_body), "prefix_labels": prefix_labels, "rendered_title": rendered, "max_chars": max_chars}
 
 
+SOURCE_ONLY_PRIMARY_RUN_MIN = 6  # 升格所需与一手证据的最长字面重叠（2026-11-06 定版）
+
+
+def _normalize_claim_text(text: Any) -> str:
+    import unicodedata
+    return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFKC", str(text or "")), flags=re.UNICODE).lower()
+
+
+def _longest_shared_run(a: str, b: str) -> int:
+    """最长连续公共子串长度；文本均为短句/片段，DP 足够。"""
+    if not a or not b:
+        return 0
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for i in range(1, len(a) + 1):
+        cur = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
+
+
+def _source_only_claim_ids(claims: list[Any], video: Any) -> list[str]:
+    """引用证据全指原题（source）且找不到一手证据字面互证的陈述集合。
+
+    仅原题闸的语义是「孤证不可核验，转人工」；互证只认一手证据
+    （raw_asr/raw_ocr/raw_frame）——model_derived_uncalibrated 的转述**不算**：
+    用模型自己的衍生描述给模型引用升格等于让被核验对象自证（V 集 v2-20261106
+    回放实测：13 条被拦可用候选的互证全部来自衍生证据，零条有一手互证）。
+    """
+    evidence_types = {e.evidence_id: e.quality for e in video.evidence}
+    primary_texts = [_normalize_claim_text(e.text) for e in video.evidence if str(e.quality or "").startswith("raw_")]
+    out: list[str] = []
+    for c in claims:
+        refs = getattr(c, "evidence_refs", None) or []
+        if not refs or not all(evidence_types.get(r) == "source" for r in refs):
+            continue
+        ct = _normalize_claim_text(getattr(c, "text", ""))
+        if ct and primary_texts and any(_longest_shared_run(ct, pt) >= SOURCE_ONLY_PRIMARY_RUN_MIN for pt in primary_texts):
+            continue
+        out.append(c.claim_id)
+    return out
+
+
+def _source_only_eligible_ids(route: dict[str, Any], state: dict[str, Any], candidates: list[dict[str, Any]]) -> list[str]:
+    """eligible 中引用了孤证陈述的候选（按 eligible 原序返回，保持 Q 排序语义）。"""
+    only = set(state.get("source_only_claim_ids") or [])
+    if not only:
+        return []
+    eligible = route.get("eligible_candidate_ids") or []
+    by_id = {c.get("candidate_id"): c for c in candidates}
+    return [cid for cid in eligible if set(by_id.get(cid, {}).get("claim_ids") or []) & only]
+
+
 def _slot_delivery(candidates: list[dict[str, Any]], decisions: list[dict[str, Any]], thesis_id: Any,
                    prefer_basis: str | None = None) -> tuple[list[dict[str, Any]], set[str]]:
     """每槽取 quality_sum 最高的 ready 候选；缺槽留空，不复制标题也不拿边角凑数。
@@ -3473,8 +3530,7 @@ class Pipeline:
             if sanitized:
                 self.storage.event(task_id, "N03", "event_actor_neutralized", {"count": sanitized, "reason": "事件缺一手文本证据，主语降级为「一方」"})
             state["reference_audit"] = audit_evidence(understanding, video)
-            evidence_types = {e.evidence_id: e.quality for e in video.evidence}
-            state["source_only_claim_ids"] = [c.claim_id for c in understanding.claims if c.evidence_refs and all(evidence_types.get(r) == "source" for r in c.evidence_refs)]
+            state["source_only_claim_ids"] = _source_only_claim_ids(understanding.claims, video)
             state["evidence_contract_version"] = "evidence-v1"
             primary_audit = _primary_evidence_audit(understanding, video)
             state["primary_evidence_audit"] = primary_audit
@@ -3737,8 +3793,14 @@ class Pipeline:
                         candidates["decisions"] += rewritten["decisions"]
                         round_decisions += rewritten["decisions"]
                         rewritten_ids += [c.get("candidate_id") for c in rewritten["candidates"]]
-                        if rewritten["route"].get("action") in {"needs_review", "reject"}:
-                            escalations.append(rewritten["route"])
+                        rewritten_route = rewritten["route"]
+                        if (rewritten_route.get("action") in {"needs_review", "reject"}
+                                or rewritten_route.get("pending_signal_ids")
+                                or rewritten_route.get("pending_review_candidate_ids")):
+                            # 子路由即使最终 action 仍是 handoff，只要带有局部待核候选，
+                            # 也必须进入合并分支；否则 pending 会在外层按「只有 ready」
+                            # 重新聚合时静默丢失（R09/R16 回归）。
+                            escalations.append(rewritten_route)
                     state["reviews"] = candidates["reviews"]
                     if not round_decisions:
                         candidates["route"] = {"action": "needs_review", "recommended_candidate_id": None, "eligible_candidate_ids": [], "rewrite_candidate_id": None, "reason": "REWRITE_PRODUCED_NO_CANDIDATE", "rewrite_round": round_no}
@@ -3915,8 +3977,7 @@ class Pipeline:
         state["required_prefixes"] = required
         boundary = _normalize_boundary(state.get("boundary", {}))
         state["reference_audit"] = audit_evidence(understanding, video, boundary)
-        evidence_types = {e.evidence_id: e.quality for e in video.evidence}
-        state["source_only_claim_ids"] = [c.claim_id for c in understanding.claims if c.evidence_refs and all(evidence_types.get(r) == "source" for r in c.evidence_refs)]
+        state["source_only_claim_ids"] = _source_only_claim_ids(understanding.claims, video)
         boundary, _ = _apply_primary_evidence_guard(boundary, _primary_evidence_audit(understanding, video), understanding)
         state["boundary"] = to_dict(boundary)
         # 重评同样要按边界收窄可引用单元，否则已排除单元会在重评里被放行。
@@ -3966,7 +4027,7 @@ class Pipeline:
             route = {**route, "action": "stop", "rewrite_candidate_id": None, "rewrite_targets": [], "reason": "REWRITE_BUDGET_EXHAUSTED"}
         signal_report = extract_risk_signals(video)
         state["risk_signals"] = signal_report
-        route = self._guard_handoff(route, state, state["candidates"])
+        route = self._guard_handoff(route, state, state["candidates"], task_id)
         drift = _rereview_identity_drift(state.get("candidates"), frozen)
         if drift:
             raise ValueError(f"重评期间候选身份或标题发生变化：{'；'.join(drift)}")
@@ -4444,7 +4505,7 @@ class Pipeline:
                 "reason": "THESIS_CONTRACT_DISAGREEMENT",
                 "contract_disagreement": verdict}
 
-    def _guard_handoff(self, route: dict[str, Any], state: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    def _guard_handoff(self, route: dict[str, Any], state: dict[str, Any], candidates: list[dict[str, Any]], task_id: str | None = None) -> dict[str, Any]:
         if route.get("action") != "handoff":
             return route
         reason = None
@@ -4458,7 +4519,25 @@ class Pipeline:
             reason = "THESIS_CONTRACT_INVALID"
         elif state.get("input_quality", {}).get("level") == "low" and bool(self.config.extra.get("require_human_on_low_quality_input", True)):
             reason = "INPUT_LOW_CONFIDENCE"
-        elif any(set(c.get("claim_ids", [])) & set(state.get("source_only_claim_ids", [])) for c in candidates if c.get("candidate_id") in route.get("eligible_candidate_ids", [])):
+        elif (blocked := _source_only_eligible_ids(route, state, candidates)):
+            remaining = [cid for cid in route.get("eligible_candidate_ids") or [] if cid not in set(blocked)]
+            if remaining:
+                # 按候选降级（2026-11-06 定版：取消连坐）——只有引用孤证陈述的候选
+                # 移出推荐面进 pending_review（人工仍可见），同组其余候选维持 handoff
+                # 与 Q 排序。与 THESIS 闸门「降级不清空」同一教训：整批抹掉会把可用
+                # 供给按连坐丢弃（V 集回放：8/20→10/20 的差异全部来自连坐）。
+                route = {**route,
+                         "eligible_candidate_ids": remaining,
+                         "pending_review_candidate_ids": list(dict.fromkeys((route.get("pending_review_candidate_ids") or []) + blocked)),
+                         "reason": "SOURCE_TITLE_ONLY_PARTIAL",
+                         "source_only_demoted_candidate_ids": blocked}
+                if route.get("recommended_candidate_id") in blocked:
+                    route["recommended_candidate_id"] = remaining[0]
+                if task_id:
+                    self.storage.event(task_id, "Q02", "source_only_candidate_demoted",
+                                       {"demoted": blocked, "recommended": route["recommended_candidate_id"], "remaining": remaining})
+                return route
+            # 整批都是孤证引用：保持原语义，整批转人工。
             reason = "SOURCE_TITLE_ONLY_UNVERIFIED"
         elif state.get("main_highlight_relation") != "core":
             reason = "MAIN_HIGHLIGHT_NOT_CORE"
@@ -4934,7 +5013,7 @@ class Pipeline:
         reviews = _normalize_reviews(review_raw, [c["candidate_id"] for c in candidates])
         reviews, decisions = self._validate_and_decide_reviews(video, state, candidates, reviews, checks, task_id)
         route = self._route_candidates(decisions, rewrite_round)
-        route = self._guard_handoff(route, state, candidates)
+        route = self._guard_handoff(route, state, candidates, task_id)
         if source:
             parent_codes = [str(i.get("issue_code")) for i in (parent_review.get("issues") or []) if i.get("issue_code")]
             child_codes: list[str] = []
