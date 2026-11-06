@@ -1,0 +1,7 @@
+{
+  "model_provider": "deepseek",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "generation_model": "deepseek-chat",
+  "output_dir": "runtime/chat_agent"
+}

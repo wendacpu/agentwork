@@ -1,0 +1,9 @@
+{
+  "model_provider": "siliconflow",
+  "base_url": "https://api.siliconflow.cn/v1",
+  "api_key_env": "SILICONFLOW_API_KEY",
+  "review_model": "deepseek-ai/DeepSeek-V4.1-Flash",
+  "model_timeout": 120,
+  "reasoning_effort": "off",
+  "structured_output": "off"
+}
